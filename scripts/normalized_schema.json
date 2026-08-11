@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Normalized Credit Report",
+  "type": "object",
+  "required": ["meta", "borrower", "scores", "tradelines", "inquiries"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" },
+        "imported_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "borrower": {
+      "type": "object",
+      "properties": {
+        "ssn": { "type": "string" },
+        "names": { "type": "array", "items": { "type": "string" } },
+        "birth_date": { "type": "string" },
+        "addresses": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["bureau", "score"],
+        "properties": {
+          "bureau": { "type": "string" },
+          "score": { "type": ["string", "number"] },
+          "model": { "type": "string" },
+          "date": { "type": "string" }
+        }
+      }
+    },
+    "tradelines": { "type": "array" },
+    "inquiries": { "type": "array" }
+  }
+}

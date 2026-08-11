@@ -1,0 +1,620 @@
+[
+  {
+    "schemaname": "public",
+    "tablename": "activity_logs",
+    "indexname": "activity_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX activity_logs_pkey ON public.activity_logs USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "affiliate_user_profiles",
+    "indexname": "affiliate_user_profiles_pkey",
+    "indexdef": "CREATE UNIQUE INDEX affiliate_user_profiles_pkey ON public.affiliate_user_profiles USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "affiliate_user_profiles",
+    "indexname": "idx_affiliate_user_profiles_affiliate",
+    "indexdef": "CREATE INDEX idx_affiliate_user_profiles_affiliate ON public.affiliate_user_profiles USING btree (affiliate_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "affiliates",
+    "indexname": "affiliates_contact_email_key",
+    "indexdef": "CREATE UNIQUE INDEX affiliates_contact_email_key ON public.affiliates USING btree (contact_email)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "affiliates",
+    "indexname": "affiliates_pkey",
+    "indexdef": "CREATE UNIQUE INDEX affiliates_pkey ON public.affiliates USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "ai_training_logs",
+    "indexname": "ai_training_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX ai_training_logs_pkey ON public.ai_training_logs USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "ai_training_logs",
+    "indexname": "unique_training_log",
+    "indexdef": "CREATE UNIQUE INDEX unique_training_log ON public.ai_training_logs USING btree (client_id, creditor_name, bureau, classification)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "alerts_log",
+    "indexname": "alerts_log_pkey",
+    "indexdef": "CREATE UNIQUE INDEX alerts_log_pkey ON public.alerts_log USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "alerts_log",
+    "indexname": "idx_alerts_client_open",
+    "indexdef": "CREATE INDEX idx_alerts_client_open ON public.alerts_log USING btree (client_id) WHERE (cleared_at IS NULL)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "alerts_log",
+    "indexname": "uniq_alert_per_day_track",
+    "indexdef": "CREATE UNIQUE INDEX uniq_alert_per_day_track ON public.alerts_log USING btree (client_id, alert_type, fired_date_et) WHERE (cleared_at IS NULL)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "app_secrets",
+    "indexname": "app_secrets_pkey",
+    "indexdef": "CREATE UNIQUE INDEX app_secrets_pkey ON public.app_secrets USING btree (key)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "call_logs",
+    "indexname": "call_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX call_logs_pkey ON public.call_logs USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "call_logs",
+    "indexname": "idx_call_logs_call_date",
+    "indexdef": "CREATE INDEX idx_call_logs_call_date ON public.call_logs USING btree (call_date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "call_logs",
+    "indexname": "idx_call_logs_client_created",
+    "indexdef": "CREATE INDEX idx_call_logs_client_created ON public.call_logs USING btree (client_id, created_at DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "call_logs",
+    "indexname": "idx_call_logs_client_date",
+    "indexdef": "CREATE INDEX idx_call_logs_client_date ON public.call_logs USING btree (client_id, call_date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "call_logs",
+    "indexname": "idx_call_logs_client_id",
+    "indexdef": "CREATE INDEX idx_call_logs_client_id ON public.call_logs USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "call_logs",
+    "indexname": "idx_call_logs_employee_id",
+    "indexdef": "CREATE INDEX idx_call_logs_employee_id ON public.call_logs USING btree (employee_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "call_metrics",
+    "indexname": "call_metrics_pkey",
+    "indexdef": "CREATE UNIQUE INDEX call_metrics_pkey ON public.call_metrics USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "call_metrics",
+    "indexname": "unique_employee_date",
+    "indexdef": "CREATE UNIQUE INDEX unique_employee_date ON public.call_metrics USING btree (employee_id, log_date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "call_routing",
+    "indexname": "call_routing_pkey",
+    "indexdef": "CREATE UNIQUE INDEX call_routing_pkey ON public.call_routing USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "client_documents",
+    "indexname": "client_documents_pkey",
+    "indexdef": "CREATE UNIQUE INDEX client_documents_pkey ON public.client_documents USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "client_documents",
+    "indexname": "idx_client_documents_client_id",
+    "indexdef": "CREATE INDEX idx_client_documents_client_id ON public.client_documents USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "client_reports",
+    "indexname": "client_reports_client_created_idx",
+    "indexdef": "CREATE INDEX client_reports_client_created_idx ON public.client_reports USING btree (client_id, created_at DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "client_reports",
+    "indexname": "client_reports_pkey",
+    "indexdef": "CREATE UNIQUE INDEX client_reports_pkey ON public.client_reports USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "client_sensitive",
+    "indexname": "client_sensitive_pkey",
+    "indexdef": "CREATE UNIQUE INDEX client_sensitive_pkey ON public.client_sensitive USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "client_sensitive",
+    "indexname": "idx_sensitive_hash",
+    "indexdef": "CREATE INDEX idx_sensitive_hash ON public.client_sensitive USING btree (ssn_hash)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "client_sensitive",
+    "indexname": "idx_sensitive_last4",
+    "indexdef": "CREATE INDEX idx_sensitive_last4 ON public.client_sensitive USING btree (ssn_last4)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "clients_pkey",
+    "indexdef": "CREATE UNIQUE INDEX clients_pkey ON public.clients USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "clients_public_token_key",
+    "indexdef": "CREATE UNIQUE INDEX clients_public_token_key ON public.clients USING btree (public_token)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_admin",
+    "indexdef": "CREATE INDEX idx_clients_admin ON public.clients USING btree (admin_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_admin_id",
+    "indexdef": "CREATE INDEX idx_clients_admin_id ON public.clients USING btree (admin_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_agent_id",
+    "indexdef": "CREATE INDEX idx_clients_agent_id ON public.clients USING btree (agent_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_call_done",
+    "indexdef": "CREATE INDEX idx_clients_call_done ON public.clients USING btree (call_completed_at)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_company_id",
+    "indexdef": "CREATE INDEX idx_clients_company_id ON public.clients USING btree (company_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_created_at",
+    "indexdef": "CREATE INDEX idx_clients_created_at ON public.clients USING btree (created_at)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_created_at_desc",
+    "indexdef": "CREATE INDEX idx_clients_created_at_desc ON public.clients USING btree (created_at DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_docs_submitted",
+    "indexdef": "CREATE INDEX idx_clients_docs_submitted ON public.clients USING btree (tu_eq_docs_submitted_at)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_followup_done",
+    "indexdef": "CREATE INDEX idx_clients_followup_done ON public.clients USING btree (tu_eq_followup_completed_at)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_full_name",
+    "indexdef": "CREATE INDEX idx_clients_full_name ON public.clients USING btree (full_name)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_paid_uploaded",
+    "indexdef": "CREATE INDEX idx_clients_paid_uploaded ON public.clients USING btree (is_paid, is_uploaded)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_progress",
+    "indexdef": "CREATE INDEX idx_clients_progress ON public.clients USING btree (progress)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "clients",
+    "indexname": "idx_clients_stage",
+    "indexdef": "CREATE INDEX idx_clients_stage ON public.clients USING btree (status_stage)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "comments",
+    "indexname": "comments_pkey",
+    "indexdef": "CREATE UNIQUE INDEX comments_pkey ON public.comments USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "comments",
+    "indexname": "idx_comments_client_id",
+    "indexdef": "CREATE INDEX idx_comments_client_id ON public.comments USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "comments",
+    "indexname": "idx_comments_client_parent_time",
+    "indexdef": "CREATE INDEX idx_comments_client_parent_time ON public.comments USING btree (client_id, parent_id, \"timestamp\" DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "companies",
+    "indexname": "companies_company_name_key",
+    "indexdef": "CREATE UNIQUE INDEX companies_company_name_key ON public.companies USING btree (company_name)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "companies",
+    "indexname": "companies_pkey",
+    "indexdef": "CREATE UNIQUE INDEX companies_pkey ON public.companies USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "company_holidays",
+    "indexname": "company_holidays_pkey",
+    "indexdef": "CREATE UNIQUE INDEX company_holidays_pkey ON public.company_holidays USING btree (date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "company_portal_users",
+    "indexname": "company_portal_users_email_key",
+    "indexdef": "CREATE UNIQUE INDEX company_portal_users_email_key ON public.company_portal_users USING btree (email)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "company_portal_users",
+    "indexname": "company_portal_users_pkey",
+    "indexdef": "CREATE UNIQUE INDEX company_portal_users_pkey ON public.company_portal_users USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "company_portal_users",
+    "indexname": "idx_company_portal_users_company_id",
+    "indexdef": "CREATE INDEX idx_company_portal_users_company_id ON public.company_portal_users USING btree (company_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "company_tasks",
+    "indexname": "company_tasks_pkey",
+    "indexdef": "CREATE UNIQUE INDEX company_tasks_pkey ON public.company_tasks USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "company_user_profiles",
+    "indexname": "company_user_profiles_pkey",
+    "indexdef": "CREATE UNIQUE INDEX company_user_profiles_pkey ON public.company_user_profiles USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "counter_clients",
+    "indexname": "counter_clients_pkey",
+    "indexdef": "CREATE UNIQUE INDEX counter_clients_pkey ON public.counter_clients USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "departments",
+    "indexname": "departments_pkey",
+    "indexdef": "CREATE UNIQUE INDEX departments_pkey ON public.departments USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "dispute_followup_queue",
+    "indexname": "dispute_followup_queue_client_id_key",
+    "indexdef": "CREATE UNIQUE INDEX dispute_followup_queue_client_id_key ON public.dispute_followup_queue USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "dispute_followup_queue",
+    "indexname": "dispute_followup_queue_pkey",
+    "indexdef": "CREATE UNIQUE INDEX dispute_followup_queue_pkey ON public.dispute_followup_queue USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "dispute_followup_queue",
+    "indexname": "idx_dfq_client",
+    "indexdef": "CREATE INDEX idx_dfq_client ON public.dispute_followup_queue USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "dispute_followup_queue",
+    "indexname": "idx_dfq_updated",
+    "indexdef": "CREATE INDEX idx_dfq_updated ON public.dispute_followup_queue USING btree (updated_at DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "dispute_followups",
+    "indexname": "dispute_followups_pkey",
+    "indexdef": "CREATE UNIQUE INDEX dispute_followups_pkey ON public.dispute_followups USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "dispute_followups",
+    "indexname": "idx_df_status_due",
+    "indexdef": "CREATE INDEX idx_df_status_due ON public.dispute_followups USING btree (status, due_date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "dispute_followups",
+    "indexname": "uq_df_client_bureau_due",
+    "indexdef": "CREATE UNIQUE INDEX uq_df_client_bureau_due ON public.dispute_followups USING btree (client_id, bureau, due_date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "docs_reminders",
+    "indexname": "docs_reminders_bureaus_gin",
+    "indexdef": "CREATE INDEX docs_reminders_bureaus_gin ON public.docs_reminders USING gin (bureaus)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "docs_reminders",
+    "indexname": "docs_reminders_client_id_key",
+    "indexdef": "CREATE UNIQUE INDEX docs_reminders_client_id_key ON public.docs_reminders USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "docs_reminders",
+    "indexname": "docs_reminders_last_seen_idx",
+    "indexdef": "CREATE INDEX docs_reminders_last_seen_idx ON public.docs_reminders USING btree (last_seen DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "docs_reminders",
+    "indexname": "docs_reminders_pkey",
+    "indexdef": "CREATE UNIQUE INDEX docs_reminders_pkey ON public.docs_reminders USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "document_logs",
+    "indexname": "document_logs_bureau_gin",
+    "indexdef": "CREATE INDEX document_logs_bureau_gin ON public.document_logs USING gin (bureau)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "document_logs",
+    "indexname": "document_logs_client_id_idx",
+    "indexdef": "CREATE INDEX document_logs_client_id_idx ON public.document_logs USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "document_logs",
+    "indexname": "document_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX document_logs_pkey ON public.document_logs USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "document_logs",
+    "indexname": "document_logs_submitted_at_idx",
+    "indexdef": "CREATE INDEX document_logs_submitted_at_idx ON public.document_logs USING btree (submitted_at DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "document_logs",
+    "indexname": "idx_document_logs_admin_id",
+    "indexdef": "CREATE INDEX idx_document_logs_admin_id ON public.document_logs USING btree (admin_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "document_logs",
+    "indexname": "idx_document_logs_callback_date",
+    "indexdef": "CREATE INDEX idx_document_logs_callback_date ON public.document_logs USING btree (callback_date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "document_logs",
+    "indexname": "idx_document_logs_client_id",
+    "indexdef": "CREATE INDEX idx_document_logs_client_id ON public.document_logs USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "document_logs",
+    "indexname": "idx_document_logs_submitted_at",
+    "indexdef": "CREATE INDEX idx_document_logs_submitted_at ON public.document_logs USING btree (submitted_at)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "document_routing",
+    "indexname": "document_routing_pkey",
+    "indexdef": "CREATE UNIQUE INDEX document_routing_pkey ON public.document_routing USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "employee_logs",
+    "indexname": "employee_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX employee_logs_pkey ON public.employee_logs USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "employee_logs",
+    "indexname": "one_log_per_employee_per_day",
+    "indexdef": "CREATE UNIQUE INDEX one_log_per_employee_per_day ON public.employee_logs USING btree (employee_id, log_date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "expenses",
+    "indexname": "expenses_category_idx",
+    "indexdef": "CREATE INDEX expenses_category_idx ON public.expenses USING btree (category)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "expenses",
+    "indexname": "expenses_company_idx",
+    "indexdef": "CREATE INDEX expenses_company_idx ON public.expenses USING btree (company_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "expenses",
+    "indexname": "expenses_date_idx",
+    "indexdef": "CREATE INDEX expenses_date_idx ON public.expenses USING btree (date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "expenses",
+    "indexname": "expenses_employee_idx",
+    "indexdef": "CREATE INDEX expenses_employee_idx ON public.expenses USING btree (employee_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "expenses",
+    "indexname": "expenses_pkey",
+    "indexdef": "CREATE UNIQUE INDEX expenses_pkey ON public.expenses USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "hl_webhook_events",
+    "indexname": "hl_webhook_events_pkey",
+    "indexdef": "CREATE UNIQUE INDEX hl_webhook_events_pkey ON public.hl_webhook_events USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "incomes",
+    "indexname": "incomes_client_idx",
+    "indexdef": "CREATE INDEX incomes_client_idx ON public.incomes USING btree (client_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "incomes",
+    "indexname": "incomes_date_idx",
+    "indexdef": "CREATE INDEX incomes_date_idx ON public.incomes USING btree (date)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "incomes",
+    "indexname": "incomes_employee_idx",
+    "indexdef": "CREATE INDEX incomes_employee_idx ON public.incomes USING btree (employee_id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "incomes",
+    "indexname": "incomes_pkey",
+    "indexdef": "CREATE UNIQUE INDEX incomes_pkey ON public.incomes USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "inquiry_removals",
+    "indexname": "inquiry_removals_pkey",
+    "indexdef": "CREATE UNIQUE INDEX inquiry_removals_pkey ON public.inquiry_removals USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "marked_clients",
+    "indexname": "marked_clients_pkey",
+    "indexdef": "CREATE UNIQUE INDEX marked_clients_pkey ON public.marked_clients USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "marked_clients",
+    "indexname": "marked_clients_unique",
+    "indexdef": "CREATE UNIQUE INDEX marked_clients_unique ON public.marked_clients USING btree (client_id, admin_id, bureau)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "notifications",
+    "indexname": "idx_notifications_created_at",
+    "indexdef": "CREATE INDEX idx_notifications_created_at ON public.notifications USING btree (created_at DESC)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "notifications",
+    "indexname": "idx_notifications_status",
+    "indexdef": "CREATE INDEX idx_notifications_status ON public.notifications USING btree (status)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "notifications",
+    "indexname": "notifications_pkey",
+    "indexdef": "CREATE UNIQUE INDEX notifications_pkey ON public.notifications USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "org_settings",
+    "indexname": "org_settings_pkey",
+    "indexdef": "CREATE UNIQUE INDEX org_settings_pkey ON public.org_settings USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "payroll_bonuses",
+    "indexname": "payroll_bonuses_pkey",
+    "indexdef": "CREATE UNIQUE INDEX payroll_bonuses_pkey ON public.payroll_bonuses USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "payroll_summary",
+    "indexname": "idx_payroll_summary_week",
+    "indexdef": "CREATE INDEX idx_payroll_summary_week ON public.payroll_summary USING btree (week_start, week_end)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "payroll_summary",
+    "indexname": "payroll_summary_employee_id_week_start_key",
+    "indexdef": "CREATE UNIQUE INDEX payroll_summary_employee_id_week_start_key ON public.payroll_summary USING btree (employee_id, week_start)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "payroll_summary",
+    "indexname": "payroll_summary_pkey",
+    "indexdef": "CREATE UNIQUE INDEX payroll_summary_pkey ON public.payroll_summary USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "payroll_summary",
+    "indexname": "unique_employee_week",
+    "indexdef": "CREATE UNIQUE INDEX unique_employee_week ON public.payroll_summary USING btree (employee_id, week_start)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "profiles",
+    "indexname": "idx_profiles_email",
+    "indexdef": "CREATE UNIQUE INDEX idx_profiles_email ON public.profiles USING btree (email)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "profiles",
+    "indexname": "idx_profiles_role",
+    "indexdef": "CREATE INDEX idx_profiles_role ON public.profiles USING btree (role)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "profiles",
+    "indexname": "profiles_pkey",
+    "indexdef": "CREATE UNIQUE INDEX profiles_pkey ON public.profiles USING btree (id)"
+  },
+  {
+    "schemaname": "public",
+    "tablename": "ssn_access_logs",
+    "indexname": "ssn_access_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX ssn_access_logs_pkey ON public.ssn_access_logs USING btree (id)"
+  }
+]

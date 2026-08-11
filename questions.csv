@@ -1,0 +1,48 @@
+Section,Question,Type,Options,Required
+Personal Information,Title,Dropdown,"Mr, Ms, Mrs, Miss, Dr, Prof",No
+Personal Information,First Name,Short Answer,,Yes
+Personal Information,Middle Name,Short Answer,,No
+Personal Information,Surname,Short Answer,,Yes
+Personal Information,Date of Birth,Date,,Yes
+Personal Information,Sex,Multiple Choice,"Male, Female, Non-binary / Gender diverse, Prefer not to say",Yes
+Personal Information,Password,Short Answer,,Yes
+Contact Information,Email Address,Short Answer,,Yes
+Contact Information,Alternative Email,Short Answer,,No
+Contact Information,Home Phone,Short Answer,,No
+Contact Information,Work Phone,Short Answer,,No
+Contact Information,Mobile,Short Answer,,Yes
+Residential Address,Building Name,Short Answer,,No
+Residential Address,Unit / Flat Number,Short Answer,,No
+Residential Address,Street Number,Short Answer,,Yes
+Residential Address,Street Name,Short Answer,,Yes
+Residential Address,Suburb,Short Answer,,Yes
+Residential Address,State,Dropdown,"ACT, NSW, NT, QLD, SA, TAS, VIC, WA",Yes
+Residential Address,Post Code,Short Answer,,Yes
+Residential Address,Country,Short Answer,Australia,Yes
+Delivery Address,Company Name,Short Answer,,No
+Delivery Address,Attention To,Short Answer,,No
+Delivery Address,Street Number,Short Answer,,No
+Delivery Address,Street Name,Short Answer,,No
+Delivery Address,Suburb,Short Answer,,No
+Delivery Address,State,Dropdown,"ACT, NSW, NT, QLD, SA, TAS, VIC, WA",No
+Delivery Address,Post Code,Short Answer,,No
+Background,Indigenous Status,Dropdown,"Aboriginal but not Torres Strait Islander origin, Torres Strait Islander but not Aboriginal origin, Both Aboriginal and Torres Strait Islander origin, Neither Aboriginal nor Torres Strait Islander origin, Prefer not to say",Yes
+Background,Language Spoken at Home,Short Answer,,Yes
+Background,Proficiency in Spoken English,Multiple Choice,"Very Well, Well, Not Well, Not at all",Yes
+Background,Labour Force Status,Dropdown,"Full-time employed, Part-time employed, Self-employed, Unemployed – seeking work, Not employed – not seeking work",Yes
+Background,Currently at School?,Multiple Choice,"Yes, No",Yes
+Disability,Do you have a disability?,Multiple Choice,"Yes, No, Prefer not to say",Yes
+Disability,Disability Type,Dropdown,"Hearing / Deaf, Physical, Intellectual, Learning, Mental illness, Acquired brain impairment, Vision, Medical condition, Other",No
+Education,Highest School Level Completed,Dropdown,"Year 8 or below, Year 9, Year 10, Year 11, Year 12 or equivalent",Yes
+Education,Year Completed,Short Answer,,Yes
+Education,Do you have prior education/training?,Multiple Choice,"Yes, No",Yes
+Education,Prior Education Achievement,Dropdown,"Bachelor degree or higher, Advanced Diploma / Associate Degree, Diploma, Certificate IV, Certificate III, Certificate III, Certificate II, Certificate I, Certificates other",No
+Enrolment,Student Number,Short Answer,,No
+Enrolment,Unique Student ID (USI),Short Answer,,No
+Enrolment,Course ID,Short Answer,,Yes
+Enrolment,Date Started,Date,,Yes
+Enrolment,Date Completed,Date,,No
+Emergency,Next of Kin Name,Short Answer,,Yes
+Emergency,Next of Kin Contact Number,Short Answer,,Yes
+Consultant,Consultant Name,Short Answer,,No
+Consultant,Consultant Email,Short Answer,,No

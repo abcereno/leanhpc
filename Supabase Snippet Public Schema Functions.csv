@@ -1,0 +1,1033 @@
+schema,function_name,arguments,returns,language,security_definer,volatility,parallel,comment,definition
+public,admin_link_company_account,"existing_company_id uuid, user_email text, user_password text",uuid,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.admin_link_company_account(existing_company_id uuid, user_email text, user_password text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'auth', 'extensions'
+AS $function$
+DECLARE
+  target_user_id uuid;
+  company_name_from_table text;
+  encrypted_password text;
+BEGIN
+  -- 1. Get Company Name
+  SELECT company_name INTO company_name_from_table
+  FROM public.companies
+  WHERE id = existing_company_id;
+
+  IF company_name_from_table IS NULL THEN
+    RAISE EXCEPTION 'No company found with ID: %', existing_company_id;
+  END IF;
+
+  -- 2. Check if user already exists in auth.users
+  SELECT id INTO target_user_id FROM auth.users WHERE email = user_email;
+
+  IF target_user_id IS NULL THEN
+    -- PATH A: USER DOES NOT EXIST -> CREATE EVERYTHING
+    target_user_id := gen_random_uuid();
+    encrypted_password := crypt(user_password, gen_salt('bf'));
+
+    INSERT INTO auth.users (id, email, encrypted_password, aud, role, email_confirmed_at, created_at, updated_at, raw_user_meta_data)
+    VALUES (
+      target_user_id, user_email, encrypted_password, 'authenticated', 'authenticated', now(), now(), now(),
+      jsonb_build_object('full_name', company_name_from_table, 'role', 'company', 'signup_type', 'company')
+    );
+
+    INSERT INTO auth.identities (id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at, email)
+    VALUES (gen_random_uuid(), target_user_id, jsonb_build_object('sub', target_user_id, 'email', user_email), 'email', NULL, now(), now(), user_email);
+  ELSE
+    -- PATH B: USER EXISTS -> UPDATE METADATA ONLY
+    UPDATE auth.users 
+    SET raw_user_meta_data = raw_user_meta_data || jsonb_build_object('role', 'company', 'signup_type', 'company')
+    WHERE id = target_user_id;
+  END IF;
+
+  -- 3. UPSERT the Profile linkage (handles existing or new)
+  INSERT INTO public.company_user_profiles (id, company_id, email, full_name, role)
+  VALUES (target_user_id, existing_company_id, user_email, company_name_from_table, 'company_admin')
+  ON CONFLICT (id) DO UPDATE 
+  SET company_id = EXCLUDED.company_id, 
+      role = EXCLUDED.role;
+
+  RETURN target_user_id;
+END;
+$function$
+"
+public,auto_create_company_profile,,trigger,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.auto_create_company_profile()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  -- If the company is created with an owner (auth_user_id), create their profile
+  IF NEW.auth_user_id IS NOT NULL THEN
+    INSERT INTO public.company_user_profiles (id, company_id, full_name, email, role)
+    VALUES (
+      NEW.auth_user_id,
+      NEW.id,
+      NEW.company_name,        -- Use Company Name as default Full Name
+      NEW.contact_email,       -- Use Contact Email
+      'company_admin'          -- Default role
+    )
+    ON CONFLICT (id) DO NOTHING; -- Skip if already exists
+  END IF;
+  RETURN NEW;
+END;
+$function$
+"
+public,calculate_daily_hours,,void,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.calculate_daily_hours()
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  INSERT INTO employee_summary (employee_id, log_date, total_hours)
+  SELECT
+    employee_id,
+    log_date,
+    SUM(EXTRACT(EPOCH FROM (logout_time - login_time)) / 3600.0) AS total_hours
+  FROM employee_logs
+  WHERE logout_time IS NOT NULL
+    AND log_date = CURRENT_DATE
+  GROUP BY employee_id, log_date;
+END;
+$function$
+"
+public,clear_docs_reminder,"p_client_id uuid, p_bureaus text[]",void,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.clear_docs_reminder(p_client_id uuid, p_bureaus text[] DEFAULT NULL::text[])
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  -- If no specific bureaus provided, delete the reminder entirely
+  if p_bureaus is null or array_length(p_bureaus, 1) is null then
+    delete from public.docs_reminders where client_id = p_client_id;
+    return;
+  end if;
+
+  -- Remove only the provided bureaus
+  update public.docs_reminders r
+     set bureaus = array(
+       select e from unnest(coalesce(r.bureaus, '{}'::text[])) e
+       except
+       select e2 from unnest(p_bureaus) e2
+     )
+   where r.client_id = p_client_id;
+
+  -- If nothing left, delete the row
+  delete from public.docs_reminders
+   where client_id = p_client_id
+     and (bureaus is null or coalesce(array_length(bureaus, 1), 0) = 0);
+end;
+$function$
+"
+public,count_business_days,"start_date date, end_date date",integer,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.count_business_days(start_date date, end_date date)
+ RETURNS integer
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    business_days INTEGER;
+BEGIN
+    -- If start is after end, return 0 to avoid negative numbers
+    IF start_date > end_date THEN
+        RETURN 0;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO business_days
+    FROM generate_series(start_date, end_date, '1 day'::interval) AS day
+    WHERE 
+        -- 1. Exclude Weekends (ISO Day of Week: 6=Sat, 7=Sun)
+        EXTRACT(ISODOW FROM day) < 6 
+        
+        -- 2. Exclude Holidays found in your new table
+        AND day::date NOT IN (SELECT date FROM public.company_holidays);
+
+    RETURN business_days;
+END;
+$function$
+"
+public,create_company_agent,"target_company_id uuid, agent_email text, agent_password text, agent_name text",uuid,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.create_company_agent(target_company_id uuid, agent_email text, agent_password text, agent_name text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'auth', 'extensions'
+AS $function$
+DECLARE
+  new_user_id uuid;
+  encrypted_pw text;
+BEGIN
+  -- Check if user exists
+  IF EXISTS (SELECT 1 FROM auth.users WHERE email = agent_email) THEN
+    RAISE EXCEPTION 'User % already exists.', agent_email;
+  END IF;
+
+  new_user_id := gen_random_uuid();
+  encrypted_pw := crypt(agent_password, gen_salt('bf'));
+
+  -- Create Auth User
+  INSERT INTO auth.users (
+    id, email, encrypted_password, email_confirmed_at, role, aud, created_at, updated_at,
+    raw_user_meta_data
+  )
+  VALUES (
+    new_user_id, agent_email, encrypted_pw, now(), 'authenticated', 'authenticated', now(), now(),
+    jsonb_build_object(
+        'full_name', agent_name, 
+        'skip_profile_creation', 'true',
+        'role', 'agent' -- <--- ADDED: Ensures Login.jsx routes to Agent Dashboard
+    )
+  );
+
+  -- Create Identity (Already present, keeping it)
+  INSERT INTO auth.identities (
+    id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at, email
+  )
+  VALUES (
+    gen_random_uuid(), new_user_id, jsonb_build_object('sub', new_user_id, 'email', agent_email),
+    'email', NULL, now(), now(), agent_email
+  );
+
+  -- Create Profile Link
+  INSERT INTO public.company_user_profiles (
+    id, 
+    company_id, 
+    full_name, 
+    role,
+    email -- <--- Best practice to populate this for easy reading
+  )
+  VALUES (
+    new_user_id, 
+    target_company_id, 
+    agent_name, 
+    'agent', -- Standardized role name
+    agent_email
+  );
+
+  RETURN new_user_id;
+END;
+$function$
+"
+public,create_staff_member,"target_email text, target_password text, target_name text, target_role text",void,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.create_staff_member(target_email text, target_password text, target_name text, target_role text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+DECLARE
+  new_user_id uuid := gen_random_uuid();
+BEGIN
+  -- Insert into auth.users WITH the metadata needed for the trigger
+  INSERT INTO auth.users (
+    instance_id, id, aud, role, email, encrypted_password, 
+    email_confirmed_at, raw_user_meta_data
+  )
+  VALUES (
+    '00000000-0000-0000-0000-000000000000',
+    new_user_id,
+    'authenticated',
+    'authenticated',
+    target_email,
+    crypt(target_password, gen_salt('bf')),
+    now(),
+    -- 👇 This JSON tells the handle_new_user trigger to put them in the 'profiles' table!
+    jsonb_build_object('role', target_role, 'full_name', target_name)
+  );
+END;
+$function$
+"
+public,find_clients_by_ssn,p_ssn text,"TABLE(id uuid, full_name text, masked_ssn text, created_at timestamp with time zone)",plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.find_clients_by_ssn(p_ssn text)
+ RETURNS TABLE(id uuid, full_name text, masked_ssn text, created_at timestamp with time zone)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  clean  text;
+  pepper text;
+  hash   text;
+begin
+  if p_ssn is null then return; end if;
+  clean := regexp_replace(p_ssn, '\D', '', 'g');
+  if length(clean) <> 9 then return; end if;
+
+  select value into pepper from public.app_secrets where key = 'ssn_pepper' limit 1;
+  if coalesce(pepper,'') = '' then return; end if;
+
+  hash := encode(digest(pepper || clean, 'sha256'), 'hex');
+
+  return query
+  select c.id, c.full_name, c.ssn as masked_ssn, c.created_at
+    from public.clients c
+    join public.client_sensitive s on s.client_id = c.id
+   where s.ssn_hash = hash;
+end;
+$function$
+"
+public,fn_docs_reminders_cleanup,,trigger,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.fn_docs_reminders_cleanup()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  if not exists (select 1 from public.docs_reminders r where r.client_id = new.client_id) then
+    return new;
+  end if;
+
+  if new.bureau is null then
+    delete from public.docs_reminders where client_id = new.client_id;
+    return new;
+  end if;
+
+  update public.docs_reminders r
+     set bureaus = array(
+       select e from unnest(coalesce(r.bureaus, '{}'::text[])) e
+       except
+       select e2 from unnest(new.bureau) e2
+     )
+   where r.client_id = new.client_id;
+
+  delete from public.docs_reminders
+   where client_id = new.client_id
+     and (bureaus is null or coalesce(array_length(bureaus, 1), 0) = 0);
+
+  return new;
+end;
+$function$
+"
+public,fn_set_affiliate_commission,,trigger,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.fn_set_affiliate_commission()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  rate numeric;
+BEGIN
+  IF NEW.affiliate_id IS NULL OR NEW.total_fee IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT commission_rate INTO rate
+  FROM public.affiliates
+  WHERE id = NEW.affiliate_id;
+
+  IF rate IS NULL THEN
+    rate := 0;
+  END IF;
+
+  NEW.affiliate_commission_amount := NEW.total_fee * rate;
+
+  RETURN NEW;
+END;
+$function$
+"
+public,force_uppercase_name,,trigger,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.force_uppercase_name()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    NEW.full_name := UPPER(NEW.full_name);
+    RETURN NEW;
+END;
+$function$
+"
+public,generate_hpc_invoice_number,,text,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.generate_hpc_invoice_number()
+ RETURNS text
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    next_val INT;
+    current_year TEXT;
+BEGIN
+    SELECT nextval('hpc_invoice_seq') INTO next_val;
+    current_year := to_char(CURRENT_DATE, 'YYYY');
+    -- Returns format like HPC-2026-0001
+    RETURN 'HPC-' || current_year || '-' || LPAD(next_val::text, 4, '0');
+END;
+$function$
+"
+public,get_client_ssn_full,p_client_id uuid,text,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.get_client_ssn_full(p_client_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare
+  v_uid      uuid := auth.uid();
+  enc_key    text;
+  enc_val    bytea;
+  ssn_plain  text;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  if not public.is_privileged() then
+    raise exception 'forbidden' using errcode = '42501';
+  end if;
+
+  select value into enc_key from public.app_secrets where key='ssn_enc_key' limit 1;
+  if coalesce(enc_key,'')='' then
+    raise exception 'secrets not configured';
+  end if;
+
+  select s.ssn_enc into enc_val
+  from public.client_sensitive s
+  where s.client_id = p_client_id;
+
+  if enc_val is null then
+    return null;
+  end if;
+
+  -- Decrypt; two-arg variant matches our encrypt call
+  ssn_plain := pgp_sym_decrypt(enc_val, enc_key);
+
+  return ssn_plain; -- 9 digits (no dashes)
+end;
+$function$
+"
+public,get_company_agents,target_company_id uuid,"TABLE(id uuid, full_name text, role text)",plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.get_company_agents(target_company_id uuid)
+ RETURNS TABLE(id uuid, full_name text, role text)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  RETURN QUERY
+  SELECT p.id, p.full_name, p.role
+  FROM public.company_user_profiles p
+  WHERE p.company_id = target_company_id
+  -- Optional: Filter to only show 'agent' or 'company_admin' roles if desired
+  AND p.role IN ('agent', 'company_admin', 'owner', 'admin')
+  ORDER BY p.full_name;
+END;
+$function$
+"
+public,handle_new_paid_client,,trigger,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.handle_new_paid_client()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+begin
+  if new.is_paid = true and old.is_paid = false then
+    insert into public.document_routing (client_id, round_count)
+    values (new.id, 1);
+  end if;
+  return new;
+end;
+$function$
+"
+public,handle_new_user,,trigger,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.handle_new_user()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'auth'
+AS $function$
+DECLARE
+  v_role text := coalesce(new.raw_user_meta_data->>'role', 'client');
+  v_signup_type text := coalesce(new.raw_user_meta_data->>'signup_type', '');
+  v_full_name text := coalesce(new.raw_user_meta_data->>'full_name', 'New User');
+  v_phone text := coalesce(new.raw_user_meta_data->>'phone', '');
+  -- Fallback to full_name if company_name isn't explicitly provided
+  v_company_name text := coalesce(new.raw_user_meta_data->>'company_name', new.raw_user_meta_data->>'full_name'); 
+BEGIN
+  -- ⚡ SAFE AUTO-CONFIRMATION (Added IS NULL to prevent infinite loop crashes)
+  UPDATE auth.users 
+  SET email_confirmed_at = NOW(),
+      raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || '{""email_verified"": true}'::jsonb
+  WHERE id = NEW.id AND email_confirmed_at IS NULL;
+
+  -- 🚀 ERROR-PROOF ROUTING LOGIC
+  BEGIN
+    -- 🏢 1. COMPANY / PARTNER ROUTING
+    IF v_signup_type = 'company' OR v_role = 'company' THEN
+      
+      -- Create the main Company Profile
+      INSERT INTO public.companies (id, auth_user_id, company_name, contact_email, phone, status)
+      VALUES (NEW.id, NEW.id, v_company_name, NEW.email, v_phone, 'active')
+      ON CONFLICT DO NOTHING;
+
+      -- Link the Owner so the CompanyAuthContext catches them!
+      INSERT INTO public.company_user_profiles (id, company_id, email, full_name, role)
+      VALUES (NEW.id, NEW.id, NEW.email, v_full_name, 'company_owner')
+      ON CONFLICT DO NOTHING;
+
+    -- 🤝 2. AFFILIATE ROUTING
+    ELSIF v_signup_type = 'affiliate' OR v_role = 'affiliate' THEN
+      INSERT INTO public.affiliates (auth_user_id, affiliate_name, contact_email, contact_phone, status)
+      VALUES (NEW.id, v_full_name, NEW.email, v_phone, 'pending')
+      ON CONFLICT DO NOTHING;
+
+    -- 👤 3. INDIVIDUAL CLIENT ROUTING
+    ELSIF v_signup_type = 'individual' OR v_role IN ('individual', 'client') THEN
+      INSERT INTO public.clients (auth_user_id, full_name, email, phone, status)
+      VALUES (NEW.id, v_full_name, NEW.email, v_phone, 'pending')
+      ON CONFLICT DO NOTHING;
+
+    -- 🛡️ 4. INTERNAL STAFF ROUTING (Admins, Callers, Counters)
+    ELSE
+      INSERT INTO public.profiles (id, email, role, full_name)
+      VALUES (NEW.id, NEW.email, v_role, v_full_name)
+      ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, role = EXCLUDED.role, full_name = EXCLUDED.full_name;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'Failed to route user %: %', NEW.id, SQLERRM;
+  END;
+
+  RETURN NEW;
+END;
+$function$
+"
+public,handle_new_user_signup,,trigger,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.handle_new_user_signup()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  meta_role text;
+  meta_signup_type text;
+BEGIN
+  meta_role := new.raw_user_meta_data->>'role';
+  meta_signup_type := new.raw_user_meta_data->>'signup_type';
+
+  -- 🛑 SEPARATION GUARD:
+  -- Your Login.jsx handles the inserts for these types manually.
+  -- We must EXIT here so the database doesn't try to auto-create a Company.
+  IF meta_role IN ('individual', 'client', 'affiliate', 'company', 'company_admin', 'agent') 
+      OR meta_signup_type IN ('individual', 'affiliate', 'company') THEN
+      RETURN new;
+  END IF;
+
+  -- ⬇️ LEGACY LOGIC BELOW (Runs only for manual Admin invites without specific roles)
+  RETURN new;
+END;
+$function$
+"
+public,increment_call_metrics,"uid uuid, ldate date, total_calls integer, total_docs integer, total_disputes integer, total_confirmed integer, total_unable_to_dispute integer, total_disconnected integer, total_count integer",void,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.increment_call_metrics(uid uuid, ldate date, total_calls integer, total_docs integer, total_disputes integer, total_confirmed integer, total_unable_to_dispute integer, total_disconnected integer, total_count integer)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  INSERT INTO call_metrics (
+    employee_id, log_date,
+    total_calls, total_docs, total_disputes,
+    total_confirmed, total_unable_to_dispute, total_disconnected, total_count
+  )
+  VALUES (
+    uid, ldate,
+    total_calls, total_docs, total_disputes,
+    total_confirmed, total_unable_to_dispute, total_disconnected, total_count
+  )
+  ON CONFLICT (employee_id, log_date)
+  DO UPDATE SET
+    total_calls = call_metrics.total_calls + EXCLUDED.total_calls,
+    total_docs = call_metrics.total_docs + EXCLUDED.total_docs,
+    total_disputes = call_metrics.total_disputes + EXCLUDED.total_disputes,
+    total_confirmed = call_metrics.total_confirmed + EXCLUDED.total_confirmed,
+    total_unable_to_dispute = call_metrics.total_unable_to_dispute + EXCLUDED.total_unable_to_dispute,
+    total_disconnected = call_metrics.total_disconnected + EXCLUDED.total_disconnected,
+    total_count = call_metrics.total_count + EXCLUDED.total_count;
+END;
+$function$
+"
+public,increment_company_check_count,company_uuid uuid,void,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.increment_company_check_count(company_uuid uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  UPDATE public.companies
+  SET eligibility_checks_count = COALESCE(eligibility_checks_count, 0) + 1
+  WHERE id = company_uuid;
+END;
+$function$
+"
+public,increment_credit_analysis_count,company_uuid uuid,void,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.increment_credit_analysis_count(company_uuid uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  UPDATE public.companies
+  SET credit_analysis_count = COALESCE(credit_analysis_count, 0) + 1
+  WHERE id = company_uuid;
+END;
+$function$
+"
+public,is_admin_staff,,boolean,sql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.is_admin_staff()
+ RETURNS boolean
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT EXISTS (
+    SELECT 1
+    FROM profiles
+    WHERE id = auth.uid() AND (
+      role = 'admin' OR
+      role = 'owner' OR
+      role = 'subadmin' OR
+      role = 'callers' OR
+      role = 'counters'
+    )
+  );
+$function$
+"
+public,is_disputed_result,t text,boolean,sql,false,i,u,null,"CREATE OR REPLACE FUNCTION public.is_disputed_result(t text)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select coalesce(upper(trim(t)) in (
+    'DISPUTED','PARTLY DISPUTED','STILL UNDER DISPUTE','ACCOUNTS DISPUTED'
+  ), false)
+$function$
+"
+public,is_privileged,,boolean,sql,true,s,u,null,"CREATE OR REPLACE FUNCTION public.is_privileged()
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select exists(
+    select 1
+      from public.profiles p
+     where p.id = auth.uid()
+       and p.role in ('owner','admin','subadmin')
+  );
+$function$
+"
+public,log_inquiry_removals,records jsonb,void,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.log_inquiry_removals(records jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+declare
+  rec record;
+begin
+  for rec in
+    select 
+      (r->>'client_id')::uuid as client_id,
+      (r->>'admin_id')::uuid as admin_id,
+      (r->>'bureau')::text as bureau,
+      (r->>'log_date')::date as log_date,
+      (r->>'removed_count')::int as removed_count
+    from jsonb_array_elements(records) as r
+  loop
+    insert into inquiry_removals (client_id, admin_id, bureau, log_date, removed_count)
+    values (rec.client_id, rec.admin_id, rec.bureau, rec.log_date, rec.removed_count)
+    on conflict (client_id, admin_id, bureau, log_date)
+    do update set removed_count = inquiry_removals.removed_count + EXCLUDED.removed_count;
+  end loop;
+end;
+$function$
+"
+public,process_calls_to_docs,"p_call_task_id uuid, p_client_id uuid, p_is_fully_done boolean, p_doc_admin_id uuid",integer,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.process_calls_to_docs(p_call_task_id uuid, p_client_id uuid, p_is_fully_done boolean, p_doc_admin_id uuid)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+DECLARE
+    v_next_round INTEGER;
+BEGIN
+    -- 1. Close the Call Task
+    UPDATE call_routing SET status = 'COMPLETED' WHERE id = p_call_task_id;
+
+    -- 2. If they are fully done, stop here.
+    IF p_is_fully_done THEN
+        RETURN 0;
+    END IF;
+
+    -- 3. If NOT done, calc next round and assign to Doc Admin
+    SELECT COALESCE(MAX(round_count), 0) + 1 INTO v_next_round
+    FROM document_routing
+    WHERE client_id = p_client_id;
+
+    INSERT INTO document_routing (client_id, round_count, status, assigned_admin_id)
+    VALUES (p_client_id, v_next_round, 'PENDING', p_doc_admin_id);
+
+    RETURN v_next_round; 
+END;
+$function$
+"
+public,process_calls_to_docs,"p_call_task_id uuid, p_client_id uuid, p_is_fully_done boolean",integer,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.process_calls_to_docs(p_call_task_id uuid, p_client_id uuid, p_is_fully_done boolean)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+DECLARE
+    v_next_round INTEGER;
+BEGIN
+    -- 1. Close the Call Task
+    UPDATE call_routing SET status = 'COMPLETED' WHERE id = p_call_task_id;
+
+    -- 2. If they are fully done, stop here.
+    IF p_is_fully_done THEN
+        RETURN 0;
+    END IF;
+
+    -- 3. If NOT done, calculate next round and insert new Doc Task
+    SELECT COALESCE(MAX(round_count), 0) + 1 INTO v_next_round
+    FROM document_routing
+    WHERE client_id = p_client_id;
+
+    INSERT INTO document_routing (client_id, round_count, status, assigned_admin_id)
+    VALUES (p_client_id, v_next_round, 'PENDING', NULL);
+
+    RETURN v_next_round; -- Return the new round number to the frontend
+END;
+$function$
+"
+public,process_docs_to_calls,"p_doc_task_id uuid, p_client_id uuid, p_target_date date, p_admin_id uuid, p_log_note text, p_exp_update text, p_tu_update text, p_eq_update text",void,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.process_docs_to_calls(p_doc_task_id uuid, p_client_id uuid, p_target_date date, p_admin_id uuid, p_log_note text, p_exp_update text, p_tu_update text, p_eq_update text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+    -- 1. Update Client Bureau Statuses (Only if a string is provided)
+    UPDATE clients SET 
+        exp_status = COALESCE(p_exp_update, exp_status),
+        tu_status = COALESCE(p_tu_update, tu_status),
+        eq_status = COALESCE(p_eq_update, eq_status)
+    WHERE id = p_client_id;
+
+    -- 2. Mark Doc Task as COMPLETED
+    UPDATE document_routing SET status = 'COMPLETED' WHERE id = p_doc_task_id;
+
+    -- 3. Create new Call Routing Task
+    INSERT INTO call_routing (client_id, scheduled_date, status, assigned_admin_id)
+    VALUES (p_client_id, p_target_date, 'PENDING', NULL);
+
+    -- 4. Insert Document Log
+    INSERT INTO document_logs (client_id, admin_id, note, submitted_at)
+    VALUES (p_client_id, p_admin_id, p_log_note, now());
+
+END;
+$function$
+"
+public,process_docs_to_calls,"p_doc_task_id uuid, p_client_id uuid, p_target_date date, p_admin_id uuid, p_call_admin_id uuid, p_log_note text, p_exp_update text, p_tu_update text, p_eq_update text",void,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.process_docs_to_calls(p_doc_task_id uuid, p_client_id uuid, p_target_date date, p_admin_id uuid, p_call_admin_id uuid, p_log_note text, p_exp_update text, p_tu_update text, p_eq_update text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+    -- 1. Update Client Bureau Statuses
+    UPDATE clients SET 
+        exp_status = COALESCE(p_exp_update, exp_status),
+        tu_status = COALESCE(p_tu_update, tu_status),
+        eq_status = COALESCE(p_eq_update, eq_status)
+    WHERE id = p_client_id;
+
+    -- 2. Mark Doc Task as COMPLETED
+    UPDATE document_routing SET status = 'COMPLETED' WHERE id = p_doc_task_id;
+
+    -- 3. Create new Call Routing Task assigned to the specific Caller!
+    INSERT INTO call_routing (client_id, scheduled_date, status, assigned_admin_id)
+    VALUES (p_client_id, p_target_date, 'PENDING', p_call_admin_id);
+
+    -- 4. Insert Document Log
+    INSERT INTO document_logs (client_id, admin_id, note, submitted_at)
+    VALUES (p_client_id, p_admin_id, p_log_note, now());
+END;
+$function$
+"
+public,set_uploaded_on_first_doc,,trigger,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.set_uploaded_on_first_doc()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  UPDATE clients
+     SET is_uploaded = TRUE,
+         uploaded_timestamp = COALESCE(uploaded_timestamp, now())
+   WHERE id = NEW.client_id
+     AND COALESCE(is_uploaded, FALSE) = FALSE;
+  RETURN NEW;
+END $function$
+"
+public,touch_updated_at,,trigger,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.touch_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+begin new.updated_at := now(); return new; end $function$
+"
+public,update_client_completion_status,,trigger,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.update_client_completion_status()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  is_exp_done BOOLEAN;
+  is_tu_done BOOLEAN;
+  is_eq_done BOOLEAN;
+  today TIMESTAMP WITH TIME ZONE := now();
+BEGIN
+  is_exp_done := COALESCE(NEW.exp_completed, FALSE) OR COALESCE(NEW.exp_na, FALSE);
+  is_tu_done  := COALESCE(NEW.tu_completed, FALSE)  OR COALESCE(NEW.tu_na, FALSE);
+  is_eq_done  := COALESCE(NEW.eq_completed, FALSE)  OR COALESCE(NEW.eq_na, FALSE);
+
+  IF is_exp_done AND is_tu_done AND is_eq_done AND NEW.is_paid THEN
+    IF NEW.date_completed IS NULL THEN
+      NEW.date_completed := today;
+    END IF;
+    NEW.all_completed := TRUE;
+  ELSE
+    NEW.all_completed := FALSE;
+  END IF;
+
+  RETURN NEW;
+END;
+$function$
+"
+public,update_updated_at_column,,trigger,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+   NEW.updated_at = NOW();
+   RETURN NEW;
+END;
+$function$
+"
+public,update_weekly_payroll_summary,,void,plpgsql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.update_weekly_payroll_summary()
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+declare
+  rec record;
+  i int;
+  login_time time;
+  logout_time time;
+  total_seconds int;
+  emp_rate numeric;
+  week_start_date date;
+  week_end_date date;
+begin
+  -- Clear existing summary if needed (optional)
+  -- delete from payroll_summary;
+
+  for rec in
+    select id, employee_id, log_date, login_times, logout_times
+    from employee_logs
+  loop
+    total_seconds := 0;
+
+    -- Make sure both arrays are not null
+    if rec.login_times is not null and rec.logout_times is not null then
+      for i in 0 .. LEAST(
+        jsonb_array_length(rec.login_times),
+        jsonb_array_length(rec.logout_times)
+      ) - 1
+      loop
+        begin
+          login_time := (rec.login_times ->> i)::time;
+          logout_time := (rec.logout_times ->> i)::time;
+
+          -- Add to total only if logout is after login
+          if logout_time > login_time then
+            total_seconds := total_seconds + extract(epoch from (logout_time - login_time));
+          end if;
+        exception
+          when others then
+            -- Skip bad pairs
+            continue;
+        end;
+      end loop;
+    end if;
+
+    -- Skip logs with no valid session
+    if total_seconds = 0 then
+      continue;
+    end if;
+
+    -- Get rate from profiles
+    select coalesce(rate_per_hour, 0) into emp_rate from profiles where id = rec.employee_id;
+
+    -- Week starts on Saturday
+    week_start_date := rec.log_date - ((extract(dow from rec.log_date)::int + 1) % 7);
+    week_end_date := week_start_date + interval '6 days';
+
+    -- Insert or update
+    insert into payroll_summary (
+      id, employee_id, week_start, week_end,
+      total_hours, rate_per_hour, total_pay
+    )
+    values (
+      gen_random_uuid(),
+      rec.employee_id,
+      week_start_date,
+      week_end_date,
+      round(total_seconds / 3600.0, 2),
+      round(emp_rate, 2),
+      round((total_seconds / 3600.0) * emp_rate, 2)
+    )
+    on conflict (employee_id, week_start)
+    do update set
+      total_hours = payroll_summary.total_hours + excluded.total_hours,
+      total_pay = payroll_summary.total_pay + excluded.total_pay;
+  end loop;
+end;
+$function$
+"
+public,upsert_client_ssn,"p_client_id uuid, p_ssn text",jsonb,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.upsert_client_ssn(p_client_id uuid, p_ssn text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  clean  text;
+  last4  text;
+  pepper text;
+  hash   text;
+begin
+  if p_client_id is null or p_ssn is null then
+    return jsonb_build_object('success', false, 'error', 'client_id and ssn required');
+  end if;
+
+  -- Accept ""xxx-xx-xxxx"" or digits; require exactly 9 digits.
+  clean := regexp_replace(p_ssn, '\D', '', 'g');
+  if length(clean) <> 9 then
+    return jsonb_build_object('success', false, 'error', 'invalid ssn (need 9 digits)');
+  end if;
+
+  last4 := right(clean, 4);
+
+  select value into pepper from public.app_secrets where key = 'ssn_pepper' limit 1;
+  if coalesce(pepper, '') = '' then
+    return jsonb_build_object('success', false, 'error', 'pepper not configured');
+  end if;
+
+  hash := encode(digest(pepper || clean, 'sha256'), 'hex');
+
+  insert into public.client_sensitive (client_id, ssn_last4, ssn_hash)
+  values (p_client_id, last4, hash)
+  on conflict (client_id) do update
+    set ssn_last4 = excluded.ssn_last4,
+        ssn_hash  = excluded.ssn_hash;
+
+  -- Mask what’s in the public table so UI can display safely.
+  update public.clients
+     set ssn = '***-**-' || last4
+   where id = p_client_id;
+
+  return jsonb_build_object('success', true, 'last4', last4);
+end;
+$function$
+"
+public,upsert_client_ssn_full,"p_client_id uuid, p_ssn text",jsonb,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.upsert_client_ssn_full(p_client_id uuid, p_ssn text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+declare
+  clean     text;
+  last4     text;
+  pepper    text;
+  enc_key   text;
+  hash_hex  text;
+  enc_ssn   bytea;
+  v_uid     uuid := auth.uid();
+begin
+  if v_uid is null then
+    return jsonb_build_object('success', false, 'error', 'not authenticated');
+  end if;
+  if not public.is_privileged() then
+    return jsonb_build_object('success', false, 'error', 'forbidden');
+  end if;
+
+  if p_client_id is null or p_ssn is null then
+    return jsonb_build_object('success', false, 'error', 'client_id and ssn required');
+  end if;
+
+  clean := regexp_replace(p_ssn, '\D', '', 'g');
+  if length(clean) <> 9 then
+    return jsonb_build_object('success', false, 'error', 'invalid ssn (need 9 digits)');
+  end if;
+
+  last4 := right(clean, 4);
+
+  select value into pepper  from public.app_secrets where key='ssn_pepper'  limit 1;
+  select value into enc_key from public.app_secrets where key='ssn_enc_key' limit 1;
+  if coalesce(pepper,'')='' or coalesce(enc_key,'')='' then
+    return jsonb_build_object('success', false, 'error', 'secrets not configured');
+  end if;
+
+  hash_hex := encode(digest(pepper || clean, 'sha256'), 'hex');
+
+  -- encryption via pgcrypto (extensions schema now in search_path)
+  enc_ssn  := pgp_sym_encrypt(clean, enc_key, 'compress-algo=1,cipher-algo=aes256');
+
+  insert into public.client_sensitive (client_id, ssn_last4, ssn_hash, ssn_enc)
+  values (p_client_id, last4, hash_hex, enc_ssn)
+  on conflict (client_id) do update
+    set ssn_last4 = excluded.ssn_last4,
+        ssn_hash  = excluded.ssn_hash,
+        ssn_enc   = excluded.ssn_enc;
+
+  update public.clients
+     set ssn = '***-**-' || last4
+   where id = p_client_id;
+
+  return jsonb_build_object('success', true, 'last4', last4);
+end;
+$function$
+"
+public,upsert_docs_reminder,"p_client_id uuid, p_admin_id uuid, p_note text, p_bureaus text[]",void,sql,false,v,u,null,"CREATE OR REPLACE FUNCTION public.upsert_docs_reminder(p_client_id uuid, p_admin_id uuid, p_note text, p_bureaus text[])
+ RETURNS void
+ LANGUAGE sql
+AS $function$
+insert into public.docs_reminders (client_id, admin_id, note, bureaus, first_seen, last_seen)
+values (
+  p_client_id,
+  p_admin_id,
+  p_note,
+  case
+    when p_bureaus is null or array_length(p_bureaus,1) = 0 then null
+    else (select array_agg(distinct b) from unnest(p_bureaus) b)
+  end,
+  now(),
+  now()
+)
+on conflict (client_id) do update
+set
+  admin_id = coalesce(excluded.admin_id, public.docs_reminders.admin_id),
+  note     = coalesce(excluded.note, public.docs_reminders.note),
+  bureaus  = (
+    select case when count(*)=0 then null
+                else array_agg(distinct b)
+           end
+    from unnest(
+      coalesce(public.docs_reminders.bureaus, '{}'::text[])
+      || coalesce(excluded.bureaus, '{}'::text[])
+    ) b
+  ),
+  last_seen = now();
+$function$
+"
+public,verify_client_ssn,"p_client_id uuid, p_ssn text",boolean,plpgsql,true,v,u,null,"CREATE OR REPLACE FUNCTION public.verify_client_ssn(p_client_id uuid, p_ssn text)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  clean  text; 
+  pepper text; 
+  hash   text;
+begin
+  if p_client_id is null or p_ssn is null then return false; end if;
+  clean := regexp_replace(p_ssn, '\D', '', 'g');
+  if length(clean) <> 9 then return false; end if;
+
+  select value into pepper from public.app_secrets where key='ssn_pepper' limit 1;
+  if coalesce(pepper,'') = '' then return false; end if;
+
+  hash := encode(digest(pepper || clean, 'sha256'), 'hex');
+
+  return exists(
+    select 1 from public.client_sensitive s 
+     where s.client_id = p_client_id and s.ssn_hash = hash
+  );
+end;
+$function$
+"

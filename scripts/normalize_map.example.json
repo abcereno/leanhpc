@@ -1,0 +1,9 @@
+{
+  "components": [
+    { "type": "MergeCreditReports", "path": "MergeCreditReports" },
+    { "type": "TUCReportV6", "path": "TUCVantageScoreV6" },
+    { "type": "EQFVantageScoreV6", "path": "EQFVantageScoreV6" },
+    { "type": "EXPVantageScoreV6", "path": "EXPVantageScoreV6" },
+    { "type": "RawSnapshot", "path": "" }
+  ]
+}

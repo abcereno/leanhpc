@@ -1,0 +1,17 @@
+-- SUPERSEDED — do not run this file.
+--
+-- This originally derived start_inquiries from ai_tu_count/ai_exp_count/
+-- ai_eq_count. That's wrong: those columns are recomputed on every save and
+-- reflect the CURRENT count after any reclassification, not the frozen
+-- "start" count start_inquiries is meant to represent. For any client whose
+-- thread has been reclassified since it was first parsed, this would have
+-- written an incorrect start_inquiries value.
+--
+-- Use the "Backfill Start Inquiries" button in AdminClientList.jsx instead
+-- (src/components/admin/tools/BackfillStartInquiries.jsx). It reads each
+-- client's actual thread.json from Storage and computes the count the same
+-- way useInquiriesThread.js does on a real save — the correct source of
+-- truth — via the shared computeAiCounts() helper (utils/inquiryCounts.js).
+--
+-- Kept only so history shows what was tried and why it was replaced. See
+-- memory "start_inquiries/counter gap" for the full story.

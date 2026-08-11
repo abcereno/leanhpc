@@ -1,0 +1,1578 @@
+/* Font import must stay first — @import rules are ignored by browsers
+   unless they precede every other rule in the file. Previously declared
+   mid-file inside company/CompanyVisionBoard.jsx's <style> block, where it
+   was silently a no-op since it wasn't the first rule there either. */
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Inter:wght@400;600;800&display=swap');
+
+/* ==========================================================================
+   1. GLOBAL VARIABLES & THEME (The Sci-Fi Palette)
+   ========================================================================== */
+:root {
+  /* --- Backgrounds --- */
+  --bg-dark: #0B1121;       /* Deep Space (Main Body) */
+  --bg-card: #151E32;       /* Orbit Blue (Cards/Modals) */
+  --bg-hover: #1E293B;      /* Interactive Hover States */
+  --bg-input: #0F172A;      /* Darker input background */
+  
+  /* --- Typography --- */
+  --text-primary: #F8FAFC;  /* Starlight White */
+  --text-secondary: #94A3B8; /* Nebula Grey */
+  --text-muted: #64748B;    /* Darker Muted Text */
+
+  /* --- Brand Accents --- */
+  --primary-blue: #0EA5E9;  /* Neon Cyan */
+  --primary-dark: #0284C7;  /* Darker Cyan */
+  --primary-glow: rgba(14, 165, 233, 0.4); /* Soft Blue Glow */
+  
+  --accent-gold: #F59E0B;   /* Growth Gold */
+  --accent-gold-glow: rgba(245, 158, 11, 0.4);
+  
+  --accent-red: #EF4444;    /* Signal Red */
+  --accent-green: #10B981;  /* Success Green */
+  
+  /* --- Borders & Dimensions --- */
+  --border-color: #334155;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+}
+
+/* ==========================================================================
+   2. GLOBAL RESET & BASE
+   ========================================================================== */
+html, body {
+  padding: 0; margin: 0; height: 100%;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+}
+
+#root { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* Global Link Styles - High Contrast */
+a { color: var(--primary-blue); text-decoration: none; transition: all 0.2s ease; }
+a:hover { color: #38BDF8; text-shadow: 0 0 8px var(--primary-glow); }
+
+/* Custom Scrollbar */
+* { scrollbar-width: thin; scrollbar-color: var(--border-color) var(--bg-dark); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-dark); }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+
+/* ==========================================================================
+   3. BOOTSTRAP OVERRIDES (Dark Mode Enforcement)
+   ========================================================================== */
+.card {
+  background-color: var(--bg-card) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-md);
+}
+.card-header {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  font-weight: 600; color: var(--text-primary) !important;
+}
+.card-footer {
+  background-color: rgba(255, 255, 255, 0.03) !important;
+  border-top: 1px solid var(--border-color) !important;
+}
+.card-body { background-color: transparent !important; }
+
+/* Tables */
+.table { color: var(--text-primary); border-color: var(--border-color); }
+.table > :not(caption) > * > * {
+  background-color: transparent; border-bottom-width: 1px; color: var(--text-primary);
+}
+.table-hover > tbody > tr:hover > * {
+  background-color: var(--bg-hover) !important; color: var(--text-primary);
+}
+
+/* Forms */
+.form-control, .form-select {
+  background-color: var(--bg-input); border: 1px solid var(--border-color);
+  color: var(--text-primary); border-radius: 8px; padding: 10px 15px;
+}
+.form-control:focus, .form-select:focus {
+  background-color: var(--bg-input); color: var(--text-primary);
+  border-color: var(--primary-blue); box-shadow: 0 0 0 4px var(--primary-glow);
+}
+.form-control::placeholder {
+  color: bisque !important;
+  opacity: 0.7; 
+}
+
+/* Fix Input Autofill Background */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active{
+    -webkit-box-shadow: 0 0 0 30px var(--bg-input) inset !important;
+    -webkit-text-fill-color: var(--text-primary) !important;
+}
+
+/* Modals */
+.modal-content {
+  background-color: var(--bg-card); border: 1px solid var(--border-color);
+  color: var(--text-primary); box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+}
+.modal-header, .modal-footer { border-color: var(--border-color); }
+.btn-close { filter: invert(1) grayscale(100%) brightness(200%); }
+
+body.modal-open {
+  padding-right: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Utility Overrides */
+.bg-light { background-color: var(--bg-hover) !important; }
+.bg-white { background-color: var(--bg-card) !important; }
+.text-muted { color: var(--text-secondary) !important; }
+.text-dark { color: var(--text-primary) !important; }
+.border { border-color: var(--border-color) !important; }
+.black { color: black !important; }
+
+/* ==========================================================================
+   4. BUTTON & LINK CONTRAST OVERRIDES
+   ========================================================================== */
+.btn-primary {
+  background-color: var(--primary-blue) !important;
+  border-color: var(--primary-blue) !important;
+  color: var(--bg-dark) !important; 
+  font-weight: 700;
+  box-shadow: 0 0 10px var(--primary-glow);
+}
+.btn-primary:hover {
+  background-color: #38BDF8 !important; 
+  border-color: #38BDF8 !important;
+  color: var(--bg-dark) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 0 20px var(--primary-glow);
+}
+
+.btn-outline-primary {
+  color: var(--primary-blue) !important;
+  border-color: var(--primary-blue) !important;
+  font-weight: 600;
+  background: transparent;
+}
+.btn-outline-primary:hover {
+  background-color: var(--primary-blue) !important;
+  color: var(--bg-dark) !important;
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+
+.btn-danger {
+  background-color: var(--accent-red) !important;
+  border-color: var(--accent-red) !important;
+  color: white !important;
+}
+.btn-outline-danger {
+  color: var(--accent-red) !important;
+  border-color: var(--accent-red) !important;
+}
+.btn-outline-danger:hover {
+  background-color: var(--accent-red) !important;
+  color: white !important;
+}
+
+.btn-gold-gradient {
+  background: linear-gradient(90deg, #F59E0B 0%, #FCD34D 100%);
+  color: #0F172A; font-weight: 700; border: none;
+  box-shadow: 0 0 15px var(--accent-gold-glow); transition: all 0.3s ease;
+}
+.btn-gold-gradient:hover {
+  filter: brightness(1.1); transform: translateY(-1px);
+  box-shadow: 0 0 25px var(--accent-gold-glow);
+}
+
+/* ==========================================================================
+   5. ANIMATIONS & UTILITIES
+   ========================================================================== */
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+.animate-fade-up { opacity: 0; animation: fadeInUp 0.8s ease-out forwards; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.fade-in, .fade-in-element, .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+
+.hover-lift { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 25px -5px var(--primary-glow) !important;
+  border-color: var(--primary-blue) !important;
+}
+
+/* Centralized here because these were previously redefined inline inside
+   individual component <style> blocks (SupportConsole.jsx, AdminSidebar.jsx),
+   which meant they only worked while that specific component happened to be
+   mounted — every other file already using these class names (9+ files use
+   .tracking-wider, for example) was silently missing the styling the rest
+   of the time. One definition, always available, everywhere. */
+.cursor-pointer { cursor: pointer; }
+.transition-all { transition: all 0.3s ease-in-out; }
+.border-dashed { border-style: dashed !important; }
+.tracking-wider { letter-spacing: 0.1em; }
+.hover-bg-secondary:hover { background-color: rgba(255, 255, 255, 0.1); }
+
+/* Shared print utilities — .no-print is used by both ProfileStep4.jsx and
+   shared/client-pages/ClientProgressPage.jsx, so this is deliberately a
+   real shared utility rather than something namespaced. */
+@media print {
+  .no-print { display: none !important; }
+}
+
+/* .custom-scrollbar was independently redefined in 6+ files
+   (AdminSidebar.jsx, CompanyPortalDashboard.jsx, DashboardOverview.jsx,
+   LeadEligibilityFunnel.jsx, FunderEligibilityCard.jsx,
+   QuickEligibilityChecker.jsx) — one canonical definition here instead. */
+.custom-scrollbar::-webkit-scrollbar { width: 5px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #495057; border-radius: 4px; }
+
+/* ==========================================================================
+   5b. COMPONENT: CLIENT LIST (Aging Row Colors)
+   ========================================================================== */
+/* Previously an inline <style> block in AdminClientList.jsx — table-red is
+   also used by CallLogs.jsx for its "backlog" flag, so this needs to be a
+   real global rule rather than something that only rendered correctly
+   while AdminClientList also happened to be mounted. */
+tr.table-yellow td { background-color: rgba(255, 193, 7, 0.15) !important; }
+tr.table-orange td { background-color: rgba(253, 126, 20, 0.15) !important; }
+tr.table-red td { background-color: rgba(220, 53, 69, 0.15) !important; }
+tr.table-green td { background-color: rgba(25, 135, 84, 0.15) !important; }
+
+.table-hover tbody tr.table-yellow:hover td { background-color: rgba(255, 193, 7, 0.25) !important; }
+.table-hover tbody tr.table-orange:hover td { background-color: rgba(253, 126, 20, 0.25) !important; }
+.table-hover tbody tr.table-red:hover td { background-color: rgba(220, 53, 69, 0.25) !important; }
+.table-hover tbody tr.table-green:hover td { background-color: rgba(25, 135, 84, 0.25) !important; }
+
+/* ==========================================================================
+   5c. COMPONENT: ADMIN SIDEBAR
+   ========================================================================== */
+/* Previously an inline <style> block in AdminSidebar.jsx */
+.sidebar-icon-wrapper {
+  width: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-shrink: 0;
+}
+.sidebar-text {
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.2s ease-in-out;
+}
+.sidebar-text.closed {
+  opacity: 0;
+  pointer-events: none;
+}
+.sidebar-section-title {
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  color: #8aa0b5;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+
+/* ==========================================================================
+   5d. COMPONENT: COMPANY PORTAL DASHBOARD
+   ========================================================================== */
+/* Previously an inline <style> block in company/CompanyPortalDashboard.jsx.
+   Its local .cursor-pointer / .hover-lift / .custom-scrollbar redefinitions
+   were dropped in favor of the canonical global versions above — .hover-lift
+   in particular had a THIRD, slightly different definition here (yet more
+   evidence these belonged in one place). */
+.hover-bg-dark:hover { background-color: #1e293b !important; color: #ffffff !important; }
+.portal-sidebar { width: 280px; background-color: #0f172a; flex-shrink: 0; border-right: 1px solid #1e293b; z-index: 1040; }
+.portal-main { flex-grow: 1; display: flex; flex-direction: column; height: 100vh; overflow: hidden; background-color: #0B1121; min-width: 0; }
+@media (max-width: 991.98px) { .portal-sidebar { display: none; } }
+.glass-panel { background: #131b2f; border-radius: 16px; border: 1px solid #1e293b; }
+.dark-tabs .nav-link { color: #94a3b8; font-weight: 600; border-radius: 8px 8px 0 0; }
+.dark-tabs .nav-link.active { background-color: transparent !important; color: #38bdf8 !important; border-bottom: 2px solid #38bdf8; border-radius: 0; }
+.cmd-btn { background-color: #131b2f; border: 1px solid #334155; color: #f8fafc; transition: all 0.2s; }
+.cmd-btn:hover { background-color: #1e293b; border-color: #475569; color: #fff; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ==========================================================================
+   5e. SAFE NAMESPACED COMPONENT: COMPANY VISION BOARD
+   ========================================================================== */
+/* Previously an inline <style> block in company/CompanyVisionBoard.jsx.
+   Namespaced under .elite-board-wrapper (already applied to this
+   component's root element) because several of its class names — .stat-box,
+   .panel-dark, .vision-slot, .pin, .footer-glow — collide with unrelated
+   definitions elsewhere: .stat-box already means something different in
+   Section 6 (Client Profile), and .panel-dark/.vision-slot/.pin/.footer-glow
+   are reused with different styling by
+   individual/sidebars/VisionBoardView.jsx. Its .animate-fade-in and
+   @keyframes fadeIn were dropped in favor of the canonical versions in
+   Section 5 (this file had yet another conflicting @keyframes fadeIn
+   definition — the "last one mounted wins for the whole app" bug this
+   cleanup is fixing). The money-bg background image is set via a CSS
+   variable (--vision-money-bg) on the wrapper element instead of being
+   hardcoded here, so it stays in sync with AESTHETIC_IMAGES.money in the
+   component file. */
+.elite-board-wrapper {
+  background-color: #050505;
+  min-height: 100vh;
+  color: #ffffff;
+  font-family: 'Inter', sans-serif;
+  padding: 20px;
+}
+.elite-board-wrapper .text-neon-blue { color: #00D0FF !important; text-shadow: 0 0 10px rgba(0, 208, 255, 0.4); }
+.elite-board-wrapper .text-handwritten { font-family: 'Caveat', cursive; color: #00D0FF; text-shadow: 0 0 8px rgba(0, 208, 255, 0.3); }
+.elite-board-wrapper .panel-dark {
+  background-color: #080A0E;
+  border: 1px solid rgba(0, 208, 255, 0.25);
+  box-shadow: 0 0 15px rgba(0, 208, 255, 0.1);
+  border-radius: 12px;
+  padding: 24px;
+  height: 100%;
+  position: relative;
+  transition: all 0.3s ease;
+}
+.elite-board-wrapper .panel-dark:hover {
+  box-shadow: 0 0 25px rgba(0, 208, 255, 0.2);
+  border-color: rgba(0, 208, 255, 0.4);
+}
+.elite-board-wrapper .panel-neon-glow {
+  border: 1px solid rgba(0, 208, 255, 0.6);
+  box-shadow: 0 0 30px rgba(0, 208, 255, 0.25) inset, 0 0 30px rgba(0, 208, 255, 0.25);
+}
+.elite-board-wrapper .hero-img-box { position: relative; width: 100%; height: 250px; overflow: hidden; border: 1px solid rgba(0, 208, 255, 0.3); margin-bottom: 15px; border-radius: 8px; box-shadow: 0 0 15px rgba(0, 208, 255, 0.15); }
+.elite-board-wrapper .hero-img-box img { width: 100%; height: 100%; object-fit: cover; opacity: 0.7; }
+.elite-board-wrapper .hero-gradient { position: absolute; bottom: 0; left: 0; right: 0; height: 50%; background: linear-gradient(to top, #080A0E, transparent); }
+.elite-board-wrapper .stat-box { border: 1px solid rgba(0, 208, 255, 0.2); background-color: #0A0D14; border-radius: 8px; padding: 15px; text-align: center; height: 100%; display: flex; flex-direction: column; justify-content: center; }
+.elite-board-wrapper .stat-box-label { font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; font-weight: 600; }
+.elite-board-wrapper .stat-box-val { font-size: 1.8rem; font-weight: bold; color: #fff; text-shadow: 0 0 10px rgba(0, 208, 255, 0.4); }
+.elite-board-wrapper .circle-badge {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 208, 255, 0.3);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto;
+  font-size: 1.2rem; font-weight: 800;
+}
+.elite-board-wrapper .circle-badge.neon {
+  border-color: #00D0FF; color: #00D0FF;
+  box-shadow: 0 0 15px rgba(0, 208, 255, 0.4), inset 0 0 10px rgba(0, 208, 255, 0.2);
+  text-shadow: 0 0 5px rgba(0, 208, 255, 0.5);
+}
+.elite-board-wrapper .action-btn {
+  background: transparent; border: 1px solid rgba(0, 208, 255, 0.3); color: #00D0FF; padding: 8px 0; font-size: 0.75rem; border-radius: 6px;
+  text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s; font-weight: 600;
+}
+.elite-board-wrapper .action-btn:hover { background: rgba(0, 208, 255, 0.1); box-shadow: 0 0 10px rgba(0, 208, 255, 0.3); border-color: #00D0FF; color: #fff; }
+.elite-board-wrapper .vision-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.elite-board-wrapper .vision-slot {
+  position: relative; border-radius: 8px; overflow: hidden; aspect-ratio: 1/1;
+  background-color: #1A1D24; cursor: pointer;
+  border: 1px solid rgba(0, 208, 255, 0.3);
+  box-shadow: 0 0 15px rgba(0, 208, 255, 0.15);
+  transition: all 0.3s ease;
+}
+.elite-board-wrapper .vision-slot img { width: 100%; height: 100%; object-fit: cover; opacity: 0.8; transition: opacity 0.3s; }
+.elite-board-wrapper .vision-slot:hover { box-shadow: 0 0 25px rgba(0, 208, 255, 0.4); border-color: rgba(0, 208, 255, 0.8); }
+.elite-board-wrapper .vision-slot:hover img { opacity: 0.4; }
+.elite-board-wrapper .vision-slot-label { position: absolute; bottom: 0; left: 0; width: 100%; background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); padding: 20px 10px 10px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; display: flex; justify-content: space-between; text-shadow: 0 0 5px rgba(0, 208, 255, 0.5); color: #fff; z-index: 2; }
+.elite-board-wrapper .upload-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0; transition: opacity 0.3s; font-size: 2rem; color: #00D0FF; text-shadow: 0 0 15px #00D0FF; z-index: 3; }
+.elite-board-wrapper .vision-slot:hover .upload-overlay { opacity: 1; }
+.elite-board-wrapper .vision-slot-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.75rem; color: #00D0FF; text-transform: uppercase; z-index: 1; font-weight: 600; text-align: center; text-shadow: 0 0 10px rgba(0, 208, 255, 0.4); }
+.elite-board-wrapper .roadmap-container { text-align: center; }
+.elite-board-wrapper .roadmap-node { border: 2px solid rgba(0, 208, 255, 0.2); border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; margin: 0 auto; font-size: 0.7rem; font-weight: bold; background-color: #080A0E; box-shadow: 0 0 10px rgba(0,208,255,0.05); }
+.elite-board-wrapper .roadmap-node.neon { border-color: #00D0FF; color: #00D0FF; box-shadow: 0 0 20px rgba(0, 208, 255, 0.4), inset 0 0 10px rgba(0, 208, 255, 0.2); text-shadow: 0 0 5px rgba(0, 208, 255, 0.5); }
+.elite-board-wrapper .sticky-paper {
+  padding: 25px; position: relative; border-radius: 2px 2px 20px 2px;
+  box-shadow: 2px 4px 15px rgba(0, 208, 255, 0.2);
+  border: 1px solid rgba(0, 208, 255, 0.4);
+}
+.elite-board-wrapper .sticky-paper.money-bg {
+  background-image: var(--vision-money-bg);
+  background-size: cover;
+  background-blend-mode: overlay;
+  background-color: rgba(0, 20, 40, 0.92);
+  color: #00D0FF;
+}
+.elite-board-wrapper .pin {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #080A0E;
+  box-shadow: 0 0 5px rgba(0,208,255,0.8);
+}
+.elite-board-wrapper .custom-check { display: flex; align-items: flex-start; margin-bottom: 12px; font-size: 0.9rem; color: #ccc; cursor: pointer; transition: color 0.2s; }
+.elite-board-wrapper .custom-check i { color: #00D0FF; margin-right: 12px; font-size: 1.2rem; text-shadow: 0 0 8px rgba(0, 208, 255, 0.5); transition: all 0.2s; }
+.elite-board-wrapper .custom-check:hover { color: #fff; }
+.elite-board-wrapper .custom-check.completed { color: #777; text-decoration: line-through; }
+.elite-board-wrapper .custom-check.completed i { color: #555; text-shadow: none; }
+.elite-board-wrapper .footer-glow {
+  border: 1px solid rgba(0, 208, 255, 0.4) !important;
+  box-shadow: 0 0 25px rgba(0, 208, 255, 0.15);
+  background-color: #080A0E !important;
+}
+.elite-board-wrapper .footer-box { border-right: 1px solid rgba(0, 208, 255, 0.2); padding: 15px; }
+.elite-board-wrapper .footer-box:last-child { border-right: none; }
+.elite-board-wrapper .footer-icon { font-size: 1.5rem; color: #00D0FF; margin-right: 15px; text-shadow: 0 0 8px rgba(0, 208, 255, 0.4); }
+
+/* ==========================================================================
+   5f. COMPONENT: CLIENT NOTIFICATION BELL (individual portal)
+   ========================================================================== */
+/* Previously an inline <style> block in individual/ClientNotificationBell.jsx */
+.notif-dropdown-menu { width: 320px; max-height: 400px; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 1px solid #eaeaea; }
+.notif-item { transition: background-color 0.2s; cursor: pointer; white-space: normal; padding: 12px 16px; border-bottom: 1px solid #f8f9fa; }
+.notif-item:hover { background-color: #f8f9fa; }
+.notif-item.unread { background-color: #f0f7ff; border-left: 3px solid #0d6efd; }
+.notif-icon-circle { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e9ecef; color: #6c757d; }
+.notif-badge { position: absolute; top: 0; right: -5px; font-size: 0.6rem; padding: 0.3em 0.5em; border-radius: 50%; border: 2px solid white; }
+
+/* ==========================================================================
+   5g. COMPONENT: INDIVIDUAL LAYOUT
+   ========================================================================== */
+/* Previously an inline <style> block in individual/IndividualLayout.jsx.
+   The sidebar-collapsed margin was a dynamic template-literal value
+   (`${isDesktopSidebarCollapsed ? '0px' : '280px'}`) — now a CSS variable
+   set inline on the component's wrapper element instead, so this rule can
+   be static. */
+@media (min-width: 992px) {
+  .main-content-area {
+    margin-left: var(--sidebar-margin, 280px) !important;
+    transition: margin-left 0.3s ease;
+  }
+}
+.glass-banner {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+.hover-opacity:hover {
+  opacity: 1 !important;
+  color: white !important;
+}
+
+/* Previously an inline <style> block in individual/Layout.jsx (currently
+   unused/unreferenced anywhere in the app, kept for parity if it's ever
+   wired back up). */
+.layout-main-content {
+  margin-left: 0;
+  transition: margin-left 0.3s ease;
+}
+@media (min-width: 992px) {
+  .layout-main-content { margin-left: 280px !important; }
+}
+
+/* Previously an inline <style> block in individual/Sidebar.jsx */
+.sidebar-scroll::-webkit-scrollbar { width: 4px; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+/* ==========================================================================
+   5h. COMPONENT: PROFILE DASHBOARD (individual portal)
+   ========================================================================== */
+/* Previously an inline <style> block in individual/steps/ProfileDashboard.jsx
+   (its other inline block was just a duplicate of .hide-scrollbar, already
+   centralized above under Section 5d, so only this one needed moving). */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(13, 110, 253, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(13, 110, 253, 0); }
+}
+.ring-pulse { animation: pulse-ring 2s infinite; }
+
+/* ==========================================================================
+   5i. COMPONENT: PROFILE STEP 4 (individual portal agreement/print view)
+   ========================================================================== */
+/* Previously an inline <style> block in individual/steps/ProfileStep4.jsx.
+   .no-print is handled by the shared @media print rule above; these two are
+   specific to this component's printable agreement layout. */
+@media print {
+  body * { visibility: hidden; }
+  .printable-area, .printable-area * { visibility: visible; }
+  .printable-area { position: absolute; left: 0; top: 0; width: 100%; }
+  .agreement-text { max-height: none !important; overflow-y: visible !important; border: none !important; background: transparent !important; }
+}
+
+/* ==========================================================================
+   5j. SAFE NAMESPACED COMPONENT: VISION BOARD VIEW (individual portal)
+   ========================================================================== */
+/* Previously an inline <style> block in
+   individual/sidebars/VisionBoardView.jsx. This is a near-duplicate design
+   system to company/CompanyVisionBoard.jsx's "elite board" (both files were
+   clearly built from the same template) but has drifted slightly and uses
+   a different root wrapper class (.dashboard-wrapper, not
+   .elite-board-wrapper) with a few unique sections of its own (todos,
+   stepper, sticky note) — kept as its own namespaced block rather than
+   merged, to avoid changing either file's current visual behavior. Its
+   duplicate @import, .animate-fade-in, and @keyframes fadeIn were dropped
+   in favor of the canonical Section 5 versions (this was the fourth
+   conflicting @keyframes fadeIn definition found across the codebase). */
+.dashboard-wrapper { background-color: #050505; min-height: 100vh; color: #ffffff; font-family: 'Inter', sans-serif; border-radius: 12px; }
+.dashboard-wrapper .text-neon-blue { color: #00D0FF !important; text-shadow: 0 0 10px rgba(0, 208, 255, 0.4); }
+.dashboard-wrapper .text-handwritten { font-family: 'Caveat', cursive; color: #00D0FF; text-shadow: 0 0 8px rgba(0, 208, 255, 0.3); }
+.dashboard-wrapper .panel-dark {
+  background-color: #080A0E;
+  border: 1px solid rgba(0, 208, 255, 0.25);
+  box-shadow: 0 0 15px rgba(0, 208, 255, 0.1);
+  border-radius: 12px;
+  padding: 24px;
+  height: 100%;
+  position: relative;
+  transition: all 0.3s ease;
+}
+.dashboard-wrapper .panel-dark:hover {
+  box-shadow: 0 0 25px rgba(0, 208, 255, 0.2);
+  border-color: rgba(0, 208, 255, 0.4);
+}
+.dashboard-wrapper .panel-neon-glow {
+  border: 1px solid rgba(0, 208, 255, 0.6);
+  box-shadow: 0 0 30px rgba(0, 208, 255, 0.25) inset, 0 0 30px rgba(0, 208, 255, 0.25);
+}
+.dashboard-wrapper .vision-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.dashboard-wrapper .vision-slot {
+  position: relative; border-radius: 8px; overflow: hidden; aspect-ratio: 1/1;
+  background-color: #1A1D24; cursor: pointer;
+  border: 1px solid rgba(0, 208, 255, 0.3);
+  box-shadow: 0 0 15px rgba(0, 208, 255, 0.15);
+  transition: all 0.3s ease;
+}
+.dashboard-wrapper .vision-slot img { width: 100%; height: 100%; object-fit: cover; opacity: 0.8; transition: opacity 0.3s; }
+.dashboard-wrapper .vision-slot:hover { box-shadow: 0 0 25px rgba(0, 208, 255, 0.4); border-color: rgba(0, 208, 255, 0.8); }
+.dashboard-wrapper .vision-slot:hover img { opacity: 0.4; }
+.dashboard-wrapper .vision-slot-label { position: absolute; bottom: 0; left: 0; width: 100%; background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); padding: 20px 10px 10px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; display: flex; justify-content: space-between; text-shadow: 0 0 5px rgba(0, 208, 255, 0.5); }
+.dashboard-wrapper .upload-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0; transition: opacity 0.3s; font-size: 2rem; color: #00D0FF; text-shadow: 0 0 15px #00D0FF; }
+.dashboard-wrapper .vision-slot:hover .upload-overlay { opacity: 1; }
+.dashboard-wrapper .check-item { display: flex; align-items: center; margin-bottom: 12px; font-size: 0.9rem; color: #ccc; position: relative; }
+.dashboard-wrapper .check-item .check-icon { color: #00D0FF; margin-right: 12px; font-size: 1.2rem; cursor: pointer; text-shadow: 0 0 8px rgba(0, 208, 255, 0.5); }
+.dashboard-wrapper .check-item input.todo-input { background: transparent; border: 1px solid transparent; color: inherit; width: 100%; border-radius: 4px; padding: 2px 6px; transition: border 0.2s; }
+.dashboard-wrapper .check-item input.todo-input:focus { outline: none; border-color: rgba(0, 208, 255, 0.5); background: rgba(0, 208, 255, 0.05); }
+.dashboard-wrapper .check-item.completed input.todo-input { color: #777; text-decoration: line-through; }
+.dashboard-wrapper .check-item .delete-btn { opacity: 0; cursor: pointer; color: #dc3545; background: none; border: none; padding: 0 5px; transition: opacity 0.2s; }
+.dashboard-wrapper .check-item:hover .delete-btn { opacity: 1; }
+.dashboard-wrapper .add-todo-btn { font-size: 0.8rem; padding: 0; border: none; background: transparent; color: #00D0FF; opacity: 0.8; }
+.dashboard-wrapper .add-todo-btn:hover { opacity: 1; text-decoration: underline; text-shadow: 0 0 8px rgba(0, 208, 255, 0.5); }
+.dashboard-wrapper .progress-stepper { position: relative; padding-left: 20px; border-left: 2px dashed rgba(0, 208, 255, 0.2); margin-left: 20px; }
+.dashboard-wrapper .step-node { position: relative; margin-bottom: 30px; }
+.dashboard-wrapper .step-circle {
+  position: absolute; left: -43px; top: 0; width: 44px; height: 44px;
+  background: #080A0E; border-radius: 50%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; font-weight: bold;
+  border: 2px solid rgba(0, 208, 255, 0.2); box-shadow: 0 0 10px rgba(0,208,255,0.05);
+}
+.dashboard-wrapper .step-circle.active {
+  border-color: #00D0FF; color: #00D0FF;
+  box-shadow: 0 0 20px rgba(0, 208, 255, 0.4), inset 0 0 10px rgba(0, 208, 255, 0.2);
+  text-shadow: 0 0 5px rgba(0,208,255,0.5);
+}
+.dashboard-wrapper .step-circle span { font-size: 0.5rem; text-transform: uppercase; line-height: 1; }
+.dashboard-wrapper .step-circle strong { font-size: 1rem; line-height: 1; }
+.dashboard-wrapper .sticky-note { background-color: #0d47a1; color: #F8FAFC; padding: 25px; border-radius: 2px 2px 20px 2px; font-family: 'Caveat', cursive; font-size: 1.6rem; line-height: 1.3; box-shadow: 0 0 20px rgba(0, 208, 255, 0.2); border: 1px solid rgba(0,208,255,0.3); position: relative; }
+.dashboard-wrapper .sticky-pin { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 12px; height: 12px; background: #080A0E; border-radius: 50%; box-shadow: 0 0 5px rgba(0,208,255,0.8); }
+.dashboard-wrapper .icon-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; text-align: center; }
+.dashboard-wrapper .icon-box i { font-size: 2rem; color: #00D0FF; display: block; margin-bottom: 10px; text-shadow: 0 0 10px rgba(0, 208, 255, 0.4); }
+.dashboard-wrapper .icon-box span { font-size: 0.7rem; color: #999; line-height: 1.2; display: block; }
+.dashboard-wrapper .footer-glow {
+  border: 1px solid rgba(0, 208, 255, 0.4) !important;
+  box-shadow: 0 0 25px rgba(0, 208, 255, 0.15);
+}
+.dashboard-wrapper .glowing-btn {
+  box-shadow: 0 0 15px rgba(0, 208, 255, 0.2);
+  transition: all 0.3s ease;
+}
+.dashboard-wrapper .glowing-btn:hover {
+  box-shadow: 0 0 25px rgba(0, 208, 255, 0.5);
+  background-color: rgba(0, 208, 255, 0.1);
+}
+
+/* ==========================================================================
+   5k. SAFE NAMESPACED COMPONENT: CLIENT PROGRESS PAGE
+   ========================================================================== */
+/* Previously a `const layoutStyles` template-literal string rendered via
+   <style>{layoutStyles}</style> in shared/client-pages/ClientProgressPage.jsx.
+   Namespaced under .client-progress-page-root (added to this component's
+   root <Container>) rather than left as bare .report-page/.print-page
+   selectors, because Section 9 (Service Overviews) already defines
+   .report-page/.print-page globally with a DARK theme (#0B1121 background)
+   for the other report views, while this component wants a WHITE-background
+   version — a direct, silent conflict depending on which one mounts last.
+   .no-print reuses the shared @media print rule in Section 5 instead of
+   redefining it a third time. */
+.client-progress-page-root .report-viewer {
+  background-color: #525659;
+  min-height: 100vh;
+  padding: 40px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+}
+.client-progress-page-root .report-page {
+  width: 794px;
+  min-height: 1123px;
+  background-color: #ffffff;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  position: relative;
+  box-sizing: border-box;
+  padding: 40px;
+}
+.client-progress-page-root .print-page {
+  width: 794px !important;
+  min-height: 1123px !important;
+  height: auto !important;
+  background-color: #ffffff !important;
+  padding: 20px 30px;
+  box-sizing: border-box;
+  position: relative;
+}
+@media print {
+  .client-progress-page-root .report-viewer { background: white !important; padding: 0 !important; margin: 0 !important; }
+  .client-progress-page-root .report-page { width: 100% !important; height: 100% !important; box-shadow: none !important; margin: 0 !important; page-break-after: always; }
+}
+
+/* ==========================================================================
+   5l. SAFE NAMESPACED COMPONENT: CREDIT AUDIT LAYOUT
+   ========================================================================== */
+/* Previously an inline <style> block in
+   shared/client-pages/CreditAuditLayout.jsx. Namespaced under
+   .credit-audit-layout-root (added to this component's root element)
+   because the original rules used bare `tr` / `thead` tag selectors with
+   !important — those would have applied to every table row and table head
+   on the entire page, in every other component, for as long as this one
+   happened to be mounted. The printMode-dependent margin/padding values
+   are now CSS variables set inline instead of being baked into the string
+   via template-literal interpolation. */
+.credit-audit-layout-root tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+.credit-audit-layout-root thead { display: table-header-group !important; }
+.credit-audit-layout-root .print-chunk-margin {
+  margin-top: var(--print-chunk-margin-top, inherit);
+  padding-left: var(--print-chunk-padding-x, 0px);
+  padding-right: var(--print-chunk-padding-x, 0px);
+  box-sizing: border-box !important;
+}
+
+/* ==========================================================================
+   5m. SAFE NAMESPACED COMPONENT: CLIENT INTAKE FORM
+   ========================================================================== */
+/* Previously an inline <style> block in shared/public/ClientIntakeForm.jsx.
+   Namespaced under .intake-wrapper (already applied to this component's
+   root element) because .glass-card collides with a differently-styled
+   .glass-card in LeadEligibilityFunnel.jsx. */
+.intake-wrapper {
+  background-color: #0B1121;
+  background-image: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.05) 0%, transparent 50%);
+}
+.intake-wrapper .glass-card {
+  background: rgba(15, 23, 42, 0.6) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(56, 189, 248, 0.2) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37), 0 0 20px rgba(56, 189, 248, 0.05);
+  transition: all 0.3s ease;
+}
+.intake-wrapper .glass-card:hover {
+  border-color: rgba(56, 189, 248, 0.4) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 30px rgba(56, 189, 248, 0.1);
+}
+.intake-wrapper .premium-input {
+  background-color: rgba(15, 23, 42, 0.8) !important;
+  color: #f8fafc !important;
+  border: 1px solid #334155 !important;
+  border-radius: 8px;
+  padding-left: 2.5rem;
+  transition: all 0.2s ease;
+}
+.intake-wrapper .premium-input:focus {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15) !important;
+  outline: none;
+}
+.intake-wrapper .premium-input::placeholder {
+  color: #64748b !important;
+}
+.intake-wrapper .input-icon-wrapper {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #38bdf8;
+  z-index: 4;
+}
+.intake-wrapper .submit-btn {
+  background: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
+  border: none;
+  color: #0f172a;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+.intake-wrapper .submit-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
+  color: #fff;
+}
+
+/* ==========================================================================
+   5n. SAFE NAMESPACED COMPONENT: EMBEDDABLE ELIGIBILITY CHECKER
+   ========================================================================== */
+/* Previously an inline <style> block in
+   shared/public/EmbeddableEligibilityChecker.jsx — already correctly
+   scoped under #standalone-eligibility-checker (this component's own root
+   id) in the original code, just relocated here verbatim. */
+#standalone-eligibility-checker .card,
+#standalone-eligibility-checker .card-body,
+#standalone-eligibility-checker .card-header,
+#standalone-eligibility-checker .custom-checker-card { background-color: #ffffff !important; border-color: rgba(123, 186, 209, 0.4) !important; }
+#standalone-eligibility-checker .custom-checker-card { border-radius: 16px; box-shadow: 0 8px 32px rgba(0, 40, 85, 0.08) !important; overflow: hidden; }
+#standalone-eligibility-checker .form-control, #standalone-eligibility-checker .form-select, #standalone-eligibility-checker .custom-input { background-color: #ffffff !important; border: 1px solid rgba(123, 186, 209, 0.5) !important; color: #002855 !important; transition: all 0.3s ease; }
+#standalone-eligibility-checker .form-control:focus, #standalone-eligibility-checker .form-select:focus { border-color: #002855 !important; box-shadow: 0 0 0 0.25rem rgba(0, 40, 85, 0.1) !important; background-color: #ffffff !important; }
+#standalone-eligibility-checker .form-control::placeholder { color: rgba(0, 40, 85, 0.4) !important; }
+#standalone-eligibility-checker .primary-text { color: #002855 !important; }
+#standalone-eligibility-checker .accent-text { color: #7bbad1 !important; }
+#standalone-eligibility-checker .muted-primary { color: rgba(0, 40, 85, 0.6) !important; }
+#standalone-eligibility-checker .btn-custom { background-color: #002855 !important; border-color: #002855 !important; color: #ffffff !important; font-weight: 800; transition: all 0.3s ease; }
+#standalone-eligibility-checker .btn-custom:hover { background-color: #7bbad1 !important; border-color: #7bbad1 !important; color: #002855 !important; transform: translateY(-2px); }
+#standalone-eligibility-checker .btn-custom-outline { background-color: transparent !important; border: 1px solid #002855 !important; color: #002855 !important; font-weight: 700; transition: all 0.3s ease; }
+#standalone-eligibility-checker .btn-custom-outline:hover { background-color: #002855 !important; color: #ffffff !important; }
+#standalone-eligibility-checker .metric-box { background-color: #ffffff !important; border: 1px solid rgba(123, 186, 209, 0.3) !important; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+#standalone-eligibility-checker .custom-progress-bg { background-color: rgba(0, 40, 85, 0.1); border-radius: 4px; overflow: hidden; }
+#standalone-eligibility-checker .custom-progress-bar { background-color: #7bbad1; height: 100%; }
+#standalone-eligibility-checker .custom-alert { background-color: rgba(123, 186, 209, 0.1) !important; border: 1px solid rgba(123, 186, 209, 0.5) !important; color: #002855 !important; }
+
+/* ==========================================================================
+   5o. SAFE NAMESPACED COMPONENT: LEAD ELIGIBILITY FUNNEL
+   ========================================================================== */
+/* Previously an inline <style> block in
+   shared/public/LeadEligibilityFunnel.jsx. This component's root element
+   used to share id="standalone-eligibility-checker" with the (unrelated)
+   EmbeddableEligibilityChecker.jsx above — a duplicate-HTML-id bug on top
+   of a CSS bleed risk, since none of these rules were actually prefixed by
+   that id despite the root claiming it. Given a real, distinct
+   .lead-eligibility-funnel-root class instead. .glass-card, .dark-table,
+   and .dark-funder-tabs here also had different values than the same
+   class names in ClientIntakeForm.jsx / QuickEligibilityChecker.jsx. */
+.lead-eligibility-funnel-root .glass-card { background-color: #001a38; border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; }
+.lead-eligibility-funnel-root .custom-input-group { background-color: transparent !important; border: 1px solid rgba(255, 255, 255, 0.2) !important; color: #ffffff !important; border-radius: 8px !important; transition: all 0.3s ease; }
+.lead-eligibility-funnel-root .custom-input-group:focus, .lead-eligibility-funnel-root .custom-input-group:active, .lead-eligibility-funnel-root .custom-input-group:focus-within { background-color: transparent !important; color: #ffffff !important; border-color: #7bbad1 !important; box-shadow: 0 0 0 0.25rem rgba(123, 186, 209, 0.2) !important; }
+.lead-eligibility-funnel-root .input-group.custom-input-group .form-control { background-color: transparent !important; border: none !important; color: #ffffff !important; box-shadow: none !important; }
+.lead-eligibility-funnel-root input:-webkit-autofill, .lead-eligibility-funnel-root input:-webkit-autofill:hover, .lead-eligibility-funnel-root input:-webkit-autofill:focus, .lead-eligibility-funnel-root input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px #001a38 inset !important; -webkit-text-fill-color: #ffffff !important; transition: background-color 5000s ease-in-out 0s;
+}
+.lead-eligibility-funnel-root select.custom-input-group option { background-color: #001a38; color: #ffffff; }
+.lead-eligibility-funnel-root .custom-input-group .input-group-text { background-color: transparent !important; border: none !important; color: rgba(255, 255, 255, 0.5) !important; }
+.lead-eligibility-funnel-root .custom-input-group .form-control::placeholder, .lead-eligibility-funnel-root .custom-input-group::placeholder { color: rgba(255, 255, 255, 0.5) !important; }
+.lead-eligibility-funnel-root .btn-vivid-blue { background-color: #0d6efd !important; border-color: #0d6efd !important; color: white !important; border-radius: 8px; font-weight: 600; transition: all 0.3s ease; }
+.lead-eligibility-funnel-root .btn-vivid-blue:hover { background-color: #0b5ed7 !important; transform: translateY(-2px); }
+.lead-eligibility-funnel-root .navy-metric-box { background-color: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; }
+.lead-eligibility-funnel-root .dark-funder-tabs .nav-link { color: #a0b3c6; font-weight: 600; border-radius: 8px 8px 0 0; }
+.lead-eligibility-funnel-root .dark-funder-tabs .nav-link.active { background-color: rgba(255,255,255,0.05) !important; color: #7bbad1 !important; border-color: rgba(255,255,255,0.1) rgba(255,255,255,0.1) transparent; }
+.lead-eligibility-funnel-root .dark-funder-tabs { border-bottom: 2px solid rgba(255,255,255,0.1); }
+.lead-eligibility-funnel-root .dark-table { color: #e2e8f0; margin-bottom: 0; }
+.lead-eligibility-funnel-root .dark-table th { background-color: rgba(0,0,0,0.2) !important; color: #a0b3c6 !important; border-color: rgba(255,255,255,0.05); }
+.lead-eligibility-funnel-root .dark-table td { background-color: transparent !important; color: #e2e8f0 !important; border-color: rgba(255,255,255,0.05); }
+
+/* ==========================================================================
+   5p. SAFE NAMESPACED COMPONENT: QUICK ELIGIBILITY CHECKER
+   ========================================================================== */
+/* Previously an inline <style> block in
+   shared/ui/QuickEligibilityChecker.jsx. Namespaced under
+   .quick-eligibility-checker-root (added to this component's root Card)
+   because .dark-funder-tabs and .dark-table here use different colors than
+   the same class names in LeadEligibilityFunnel.jsx. */
+.quick-eligibility-checker-root .text-soft { color: #e2e8f0 !important; }
+.quick-eligibility-checker-root .dark-input { background-color: #0f172a !important; color: #e2e8f0 !important; border: 1px solid #334155 !important; }
+.quick-eligibility-checker-root .dark-input:focus { border-color: #60a5fa !important; box-shadow: 0 0 0 0.25rem rgba(96, 165, 250, 0.25) !important; }
+.quick-eligibility-checker-root .dark-funder-tabs .nav-link { color: #94a3b8; font-weight: 600; border-radius: 8px 8px 0 0; }
+.quick-eligibility-checker-root .dark-funder-tabs .nav-link.active { background-color: #1e293b !important; color: #60a5fa !important; border-color: #1e293b #1e293b transparent; }
+.quick-eligibility-checker-root .dark-funder-tabs { border-bottom: 2px solid #1e293b; }
+.quick-eligibility-checker-root .dark-accordion .accordion-item { background-color: #1e293b; border-color: #334155; }
+.quick-eligibility-checker-root .dark-accordion .accordion-button { background-color: #0f172a; color: #e2e8f0; font-weight: bold; }
+.quick-eligibility-checker-root .dark-accordion .accordion-button:not(.collapsed) { background-color: #1e293b; color: #60a5fa; box-shadow: none; }
+.quick-eligibility-checker-root .dark-table { color: #e2e8f0; margin-bottom: 0; }
+.quick-eligibility-checker-root .dark-table th { background-color: #0f172a !important; color: #94a3b8 !important; border-color: #334155; }
+.quick-eligibility-checker-root .dark-table td { background-color: #1e293b !important; color: #e2e8f0 !important; border-color: #334155; }
+
+/* ==========================================================================
+   6. COMPONENT: CLIENT PROFILE
+   ========================================================================== */
+.client-profile-page { background-color: var(--bg-dark); color: var(--text-primary); }
+.page-header {
+  padding: 16px 20px; background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); margin-bottom: 24px;
+}
+.stat-box {
+  padding: 16px; border: 1px solid var(--border-color); border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02); transition: all 0.2s ease;
+}
+.stat-box:hover {
+  transform: translateY(-2px); border-color: var(--primary-blue);
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+.stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin-bottom: 6px; }
+.stat-value { font-size: 24px; font-weight: 700; color: var(--text-primary); }
+.score-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+.score-tile {
+  padding: 16px; border: 1px solid var(--border-color); border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02); text-align: center; transition: all 0.2s ease;
+}
+.score-tile:hover {
+  transform: translateY(-3px); border-color: var(--accent-gold); box-shadow: 0 0 15px var(--accent-gold-glow);
+}
+.score-code { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+.score-value { font-size: 32px; font-weight: 800; color: var(--text-primary); margin: 4px 0; }
+.score-date { font-size: 12px; color: var(--text-muted); }
+.req-item {
+  border: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.02);
+  padding: 10px; border-radius: 8px; margin-bottom: 8px; transition: 0.2s;
+}
+.req-item:hover { background: var(--bg-hover); }
+.req-item.is-done { border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.05); }
+.cover-assets .asset-row { padding: 0.25rem 0; }
+.cover-assets .asset-row + hr { margin: 0.75rem 0; border-color: var(--border-color); }
+
+/* Previously an inline <style> block in client-profile/ClientHeader.jsx */
+.force-stretch-btn button { width: 100% !important; height: 100% !important; }
+
+/* Previously an inline <style> block in
+   client-profile/RemindersSidebar/RemindersSidebar.jsx */
+.dark-checklist .list-group-item {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+.dark-checklist .form-check-input {
+  background-color: #0f172a !important;
+  border-color: #475569 !important;
+  cursor: pointer;
+}
+.dark-checklist .form-check-input:checked {
+  background-color: #38bdf8 !important;
+  border-color: #38bdf8 !important;
+}
+.dark-checklist .form-check-label {
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+/* ==========================================================================
+   7. LEGACY STATUS HIGHLIGHTS & INQUIRY ROWS
+   ========================================================================== */
+tr.logged-in td { background-color: rgba(14, 165, 233, 0.2) !important; color: #38BDF8 !important; }
+tr.on-break td { background-color: rgba(245, 158, 11, 0.2) !important; color: #FCD34D !important; }
+tr.back-from-break td { background-color: rgba(56, 189, 248, 0.15) !important; }
+tr.logged-out td { background-color: rgba(239, 68, 68, 0.15) !important; color: #F87171 !important; }
+
+tr.row-status-green td { background-color: rgba(0, 255, 21, 0.781) !important; color: #000000 !important; }
+tr.row-status-red td { background-color: rgba(253, 0, 0, 0.747) !important; color: #000000 !important; }
+tr.row-status-blue td { background-color: rgba(29, 44, 250, 0.555) !important; color: #000000 !important; }
+tr.row-status-yellow td { background-color: rgba(248, 233, 26, 0.479) !important; color: #000000 !important; }
+
+tr.mark-admin-anthony td { background-color: rgba(16, 185, 129, 0.1) !important; border-left: 3px solid #10B981; }
+tr.mark-admin-roselle td { background-color: rgba(249, 115, 22, 0.1) !important; border-left: 3px solid #F97316; }
+tr.mark-admin-aileen td { background-color: rgba(236, 72, 153, 0.1) !important; border-left: 3px solid #EC4899; }
+tr.mark-admin-tahlia td { background-color: rgba(30, 64, 175, 0.15) !important; border-left: 3px solid #1E40AF; }
+tr.mark-admin-lovely td { background-color: rgba(147, 51, 234, 0.1) !important; border-left: 3px solid #9333EA; }
+tr.mark-admin-latoyia td { background-color: rgba(255, 255, 255, 0.05) !important; border-left: 3px solid #fff; }
+tr.mark-admin-tyisman td { background-color: rgba(219, 39, 119, 0.1) !important; border-left: 3px solid #DB2777; }
+
+.table-narrow { width: 1% !important; white-space: nowrap !important; }
+.bureau-logo { max-height: 24px; width: auto; display: block; filter: brightness(0) invert(1) opacity(0.7); }
+.letter-spacing-1 { letter-spacing: 0.5px; }
+.table td { vertical-align: middle; padding: 0.85rem 0.5rem; }
+.list-group-flush>.list-group-item{ background: transparent; color: bisque; }
+
+/* ==========================================================================
+   8. COMPONENT: INQUIRY LOADER
+   ========================================================================== */
+.loader-container {
+  display: flex; justify-content: center; align-items: center;
+  height: calc(100vh - 146px);
+  background: radial-gradient(circle at center, #1E293B 0%, var(--bg-dark) 100%);
+  overflow: hidden; position: relative;
+}
+.hero { min-height: calc(100vh - 146px); }
+.loader-container::before {
+  content: " "; display: block; position: absolute;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  z-index: 2; background-size: 100% 2px, 3px 100%; pointer-events: none;
+}
+.loader-content { text-align: center; width: 90%; max-width: 900px; position: relative; z-index: 3; }
+.svg-text { width: 100%; height: 150px; margin-bottom: 20px; }
+.letter {
+  font-family: 'Courier New', Courier, monospace; 
+  font-size: 60px; font-weight: 700; fill: transparent; stroke-width: 2px;
+  stroke: var(--primary-blue); opacity: 0; animation: neon-type 3s infinite ease-in-out alternate;
+}
+.progress-bar-container {
+  width: 100%; height: 6px; background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px; overflow: hidden; position: relative; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+.progress-bar-glow {
+  height: 100%; width: 50%;
+  background: linear-gradient(90deg, transparent, var(--primary-blue), #38BDF8, transparent);
+  border-radius: 4px; animation: loading-scan 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+.loader-subtitle {
+  margin-top: 15px; font-size: 0.85rem; letter-spacing: 3px; color: var(--text-muted);
+  text-transform: uppercase; animation: pulse 2s infinite;
+}
+@keyframes neon-type {
+  0% { stroke-dasharray: 0 50%; stroke-dashoffset: 20%; fill: transparent; opacity: 0.2; }
+  50% { fill: rgba(14, 165, 233, 0.1); opacity: 1; stroke: #38BDF8; filter: drop-shadow(0 0 5px var(--primary-blue)); }
+  100% { stroke-dasharray: 50% 0; stroke-dashoffset: -20%; fill: var(--text-primary); stroke: white; filter: drop-shadow(0 0 10px var(--primary-blue)); opacity: 1; }
+}
+@keyframes loading-scan { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
+
+/* ==========================================================================
+   9. SERVICE OVERVIEWS, VISUALIZATIONS & UTILITIES
+   ========================================================================== */
+.company-dashboard-header { margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); }
+.service-card {
+  background-color: var(--bg-card); border: 1px solid var(--border-color);
+  transition: all 0.3s ease; position: relative; overflow: hidden;
+}
+.service-card:hover {
+  transform: translateY(-5px); border-color: var(--primary-blue);
+  box-shadow: 0 0 20px var(--primary-glow) !important;
+}
+.icon-circle {
+  width: 48px; height: 48px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color);
+}
+.service-card:hover .icon-circle {
+  background: var(--primary-blue); color: #fff !important;
+  box-shadow: 0 0 10px var(--primary-glow);
+}
+.nav-pills-custom .nav-link {
+  color: var(--text-muted); font-weight: 600; border-radius: 8px; padding: 10px 15px;
+  background-color: transparent; transition: all 0.3s ease;
+}
+.nav-pills-custom .nav-link:hover { color: var(--text-primary); background-color: var(--bg-hover); }
+.nav-pills-custom .nav-link.active {
+  background-color: var(--primary-blue); 
+  color: var(--bg-dark); 
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+.progress-wrapper {
+  position: relative; height: 1.5rem; background-color: var(--bg-input); 
+  border-radius: 50rem; border: 1px solid var(--border-color); overflow: hidden;
+}
+.progress-wrapper .progress {
+  height: 100% !important; background-color: transparent !important;
+  border-radius: 0 !important; border: none !important; box-shadow: none !important;
+}
+.progress-overlay-text {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 10; color: #fff; font-weight: 800; font-size: 0.8rem; letter-spacing: 0.5px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0,0,0,0.8); pointer-events: none; 
+}
+.progress-bar { transition: width 0.6s ease; }
+.bg-success { background-color: var(--accent-green) !important; }
+.bg-warning { background-color: var(--accent-gold) !important; }
+.bg-primary { background-color: var(--primary-blue) !important; }
+
+/* REPORT RENDERING WINDOWS */
+.report-page {
+  width: 794px; min-height: 1123px; background-color: #0B1121; color: #ffffff;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5); position: relative; box-sizing: border-box; padding: 40px;
+}
+.print-page {
+  width: 794px !important; height: 1123px !important; background-color: #0B1121 !important;
+  color: #ffffff !important; padding: 40px; box-sizing: border-box; position: relative; overflow: hidden; 
+}
+
+/* ==========================================================================
+   10. SAFE NAMESPACED COMPONENT: LOGIN PAGE
+   ========================================================================== */
+.login-page-wrapper {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--bg-dark) 0%, #1e293b 100%);
+  background-size: 200% 200%; animation: gradientShift 15s ease infinite; padding: 20px;
+}
+.login-card {
+  border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+  overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); background: var(--bg-card);
+  max-width: 1000px; width: 100%; min-height: 600px;
+  opacity: 0; transform: translateY(30px); animation: fadeInUp 0.8s ease-out forwards;
+}
+.login-image-side {
+  background-image: url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80');
+  background-size: cover; background-position: center; position: relative;
+  display: flex; flex-direction: column; justify-content: flex-end; padding: 60px 40px;
+}
+.login-image-side::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(to top, var(--bg-dark) 0%, rgba(11, 17, 33, 0.4) 100%);
+}
+.login-image-content { position: relative; z-index: 1; }
+.login-form-side { padding: 50px; display: flex; flex-direction: column; justify-content: center; background-color: var(--bg-card); }
+.form-content-animate { animation: fadeIn 0.5s ease-in-out; }
+.login-image-animate { overflow: hidden; }
+
+/* Subrules integrated safely from Login.css */
+.login-page-wrapper .button-text-color, 
+.login-page-wrapper .button-text-color:hover {
+  color: #0ea5e9;
+}
+.login-page-wrapper .bg-video {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; pointer-events: none;
+}
+.login-page-wrapper .login-bg::before {
+  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: rgba(12, 14, 21, 0.8);
+}
+
+/* ==========================================================================
+   11. SAFE NAMESPACED COMPONENT: LANDING PAGE
+   ========================================================================== */
+/* Wrap your landing page wrapper component in className="landing-page-root" */
+.landing-page-root .container {
+  max-width: 1200px; margin: auto; padding: 0 20px;
+}
+.landing-page-root .min-vh-80 {
+  min-height: 80vh !important; height: 80vh !important;
+}
+.landing-page-root .hero-bg {
+  background-image: url("../assets/hero-bg.jpg");
+  background-position: right top; background-size: cover; width: 100%; min-height: 80vh !important; height: 80vh !important;
+}
+.landing-page-root .h-50 { height: 50%; }
+.landing-page-root .hero-bg::before {
+  content: ""; position: absolute; inset: 0; z-index: 1; width: 100%;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0.55) 35%, rgba(0, 0, 0, 0.25) 65%, rgba(0, 0, 0, 0) 75%);
+}
+@media (max-width: 991.98px) {
+  .landing-page-root .hero-bg::before {
+    width: 100%;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0.45) 45%, rgba(0, 0, 0, 0.1) 75%, rgba(0, 0, 0, 0) 100%);
+  }
+}
+.landing-page-root .who-we-are { background-color: #151E32; }
+.landing-page-root .circle-bg::before {
+  content: ''; background-image: url("../assets/faq.png"); background-position: center; background-size: contain; width: 100%; position: absolute;
+}
+.landing-page-root .banner-bg::before {
+  content: ''; background: black; opacity: 0.6; display: flex; justify-content: center; align-items: center; position: absolute; height: 100%; top: 0; bottom: 0; left: 0; right: 0; z-index: 1;
+}
+.landing-page-root .services-section {
+  background-image: url("../assets/cloud-bg.jpg"); background-position: right top; background-size: cover; width: 100%; min-height: 80vh !important;
+}
+
+/* Hover effect rules safely isolated away from global panels */
+.landing-page-root .hover-card { position: relative; overflow: hidden; }
+.landing-page-root .hover-card:hover .card-body-overlay { opacity: 1; transform: translateY(0); }
+.landing-page-root .hover-card { height: 400px !important; border: 4px solid white !important; }
+.landing-page-root .hover-card .card-footer { background-color: #0ea5e9 !important; }
+.landing-page-root .card-body-overlay {
+  opacity: 0; transform: translateY(20px); transition: opacity 0.3s ease, transform 0.3s ease;
+  background: rgba(0, 0, 0, 0.6) !important; height: 100%;
+}
+
+/* Gradient and action items */
+.landing-page-root .text-gradient {
+  background: linear-gradient(90deg, #0ea5e9, #2dd4bf); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.landing-page-root .hero-actions { display: flex; justify-content: center; gap: 15px; }
+
+/* Target isolated landing page actions avoiding dashboard button leakage */
+.landing-page-root .btn-primary {
+  background: #2563eb !important; color: #fff !important; padding: 12px 24px !important; border: none !important; border-radius: 6px !important; cursor: pointer !important; box-shadow: none !important;
+}
+.landing-page-root .btn-secondary {
+  background: transparent; color: #fff; padding: 12px 24px; border: 1px solid #fff; border-radius: 6px; cursor: pointer;
+}
+
+/* Feature matrices grid */
+.landing-page-root .features { padding: 80px 0; text-align: center; }
+.landing-page-root .features .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px; margin-top: 40px; }
+.landing-page-root .features .feature-card { padding: 30px; border-radius: 8px; background: #f8fafc; color: #0f172a !important; }
+
+/* Progression Flow Styles */
+.landing-page-root .how-it-works { background: #f1f5f9; padding: 80px 0; text-align: center; }
+.landing-page-root .content-col { padding-left: calc(var(--bs-gutter-x) * 0.4); padding-right: calc(var(--bs-gutter-x) * 0.4); max-width: 500px; }
+.landing-page-root .cloud { max-width: 40%; width: 30%; opacity: 0.6; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1)); transition: filter 0.3s; }
+.landing-page-root .dark .cloud { filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4)); opacity: 0.5; }
+
+/* FAQ Visual Layout elements */
+.landing-page-root .faq-bg,
+.landing-page-root .faq-bg2 { position: absolute; width: 31%; top: -78px; }
+.landing-page-root .faq-bg { left: -287px; }
+.landing-page-root .faq-bg2 { right: -287px; }
+
+/* Cloud Vectors Timelines Animations */
+@keyframes cloudCircle {
+  0% { transform: translate(0, 0); } 25% { transform: translate(50px, 20px); } 50% { transform: translate(0, 40px); } 75% { transform: translate(-50px, 20px); } 100% { transform: translate(0, 0); }
+}
+@keyframes cloudCircleReverse {
+  0% { transform: translate(0, 0); } 25% { transform: translate(-50px, 20px); } 50% { transform: translate(0, 40px); } 75% { transform: translate(50px, 20px); } 100% { transform: translate(0, 0); }
+}
+@keyframes cloudCircleSlow {
+  0% { transform: translate(0, 0); } 25% { transform: translate(30px, 15px); } 50% { transform: translate(0, 30px); } 75% { transform: translate(-30px, 15px); } 100% { transform: translate(0, 0); }
+}
+.landing-page-root .animate-cloud-circle { animation: cloudCircle 20s linear infinite; }
+.landing-page-root .animate-cloud-circle-reverse { animation: cloudCircleReverse 25s linear infinite; }
+.landing-page-root .animate-cloud-circle-slow { animation: cloudCircleSlow 40s linear infinite; }
+
+/* Accordions FAQ structural setups */
+.landing-page-root .faq-section { background-position: center top; background-size: cover; background-color: whitesmoke; width: 100%; color: #000; position: relative; }
+.landing-page-root .h-80 { height: 80%; }
+.landing-page-root .dark .faq-section { background: #111827; color: #fff; }
+.landing-page-root .faq-container { max-width: 1024px; margin: 0 auto; padding: 2rem 1rem; }
+@media (min-width: 640px) {
+  .landing-page-root .faq-container { padding-top: 4rem; padding-bottom: 4rem; }
+  .landing-page-root .faq-bg { left: -287px; }
+  .landing-page-root .faq-bg2 { right: -287px; }
+}
+.landing-page-root .faq-header { text-align: center; margin-bottom: 1.25rem; }
+@media (min-width: 768px) { .landing-page-root .faq-header { margin-bottom: 4rem; } }
+.landing-page-root .faq-title { font-weight: 700; font-size: 1.25rem; margin-bottom: 1rem; }
+@media (min-width: 1024px) { .landing-page-root .faq-title { font-size: 1.875rem; } }
+.landing-page-root .faq-content { padding-left: 0.4rem; }
+@media (min-width: 640px) {
+  .landing-page-root .faq-content { display: flex; align-items: flex-start; padding-left: 4rem; padding-right: 4rem; }
+}
+.landing-page-root .faq-spacer { flex: 1; }
+.landing-page-root .faq-list { width: 83.333333%; }
+.landing-page-root .faq-item { display: flex; align-items: flex-start; margin-bottom: 2rem; }
+.landing-page-root .faq-icon { display: none; }
+@media (min-width: 640px) {
+  .landing-page-root .faq-icon {
+    display: flex; align-items: center; justify-content: center; padding: 0.75rem; margin-right: 0.75rem;
+    background: #151E32; color: #fff; border-radius: 9999px; border: 4px solid rgb(14 165 228); font-size: 1.25rem; font-weight: 600; flex-shrink: 0;
+  }
+}
+.landing-page-root .faq-text { font-size: 1rem; }
+.landing-page-root .faq-question { font-weight: 600; margin-bottom: 0.5rem; font-size: 1rem; }
+@media (min-width: 768px) { .landing-page-root .faq-question { font-size: 1.25rem; } }
+.landing-page-root .faq-answer { font-size: 0.875rem; }
+
+/* Structural Setup for "How It Works" Section */
+.landing-page-root .bg-button { background-color: #0ea5e9 !important; }
+.landing-page-root .how-it-works-section { padding-top: 2rem; padding-bottom: 2rem; }
+@media (min-width: 576px) { .landing-page-root .how-it-works-section { padding-top: 5rem; padding-bottom: 5rem; } }
+.landing-page-root .how-it-works-title { font-size: 1.25rem; }
+@media (min-width: 992px) { .landing-page-root .how-it-works-title { font-size: 1.875rem; } }
+.landing-page-root .icon-box { width: 2.5rem; height: 2.5rem; }
+@media (min-width: 768px) { .landing-page-root .icon-box { width: 5rem; height: 5rem; } }
+
+/* Flipping UI Feature Presentation Cards scoped to Landing elements */
+.landing-page-root .card {
+  position: relative !important; box-shadow: #604b4a30 0px 70px 30px -50px !important;
+  border: 2px solid var(--color-secondary, #ccc) !important; transition: all 0.5s ease-in-out !important; overflow: hidden !important;
+  background-color: transparent !important; border-radius: 0px;
+}
+.landing-page-root .card .bottom {
+  position: absolute; bottom: 0; left: 0; right: 0; top: 80%; z-index: 2; background: #151e32; box-shadow: rgba(96, 75, 74, 0.188) 0px 5px 5px inset; transition: all 0.5s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+.landing-page-root .card:hover .bottom { top: 20%; transition: all 0.5s cubic-bezier(0.645, 0.045, 0.355, 1) 0.2s; }
+.landing-page-root .card .bottom .content { position: absolute; bottom: 0; left: 1.5rem; right: 1.5rem; display: flex; flex-direction: column; align-items: center; justify-content: start; }
+.landing-page-root .card .bottom .content .portal { display: flex; justify-content: center; font-weight: bold; color: white; background: linear-gradient(90deg, #0ea5e9, #2dd4bf); width: fit-content; border-radius: 999px; padding: 0.25rem 0.5rem; }
+.landing-page-root .card .bottom .content .heading { font-weight: bold; text-align: center; display: block; color: white; margin-top: 0.5rem; }
+.landing-page-root .card .bottom .content .about-me { text-align: center; color: white; display: block; margin-top: 0.5rem; }
+
+/* Asset Background assignments */
+.landing-page-root .card-bg-1 { background-image: url("/assets/choose-bg-1.png"); background-size: cover; background-position: center; }
+.landing-page-root .card-bg-image::before { background: transparent !important; }
+.landing-page-root .card-bg-2 { background-image: url("/assets/choose-bg-2.png"); background-size: cover; background-position: center; }
+.landing-page-root .card-bg-3 { background-color: #263a65; }
+/* ==========================================================================
+   16. COMPONENT: HIDDEN PARTNER CLOUD - SLICK SYSTEM COMPLIANT BLUEPRINT
+   ========================================================================== */
+.blueprint-report-root {
+  background-color: transparent;
+}
+
+.blueprint-report-root .blueprint-container {
+  background-color: var(--bg-card);
+  border-color: var(--border-color) !important;
+}
+
+.blueprint-report-root .blueprint-section-block {
+  background-color: transparent;
+}
+
+.blueprint-report-root .blueprint-header {
+  background: linear-gradient(135deg, #071124 0%, var(--bg-input) 100%);
+  border-bottom: 2px solid var(--primary-blue);
+  color: var(--text-primary);
+  border-radius: 12px 12px 0 0;
+}
+
+.blueprint-report-root .blueprint-header-icon {
+  color: var(--primary-blue);
+}
+
+.blueprint-report-root .blueprint-header-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.blueprint-report-root .blueprint-header-subtitle {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  letter-spacing: 2px;
+}
+
+.blueprint-report-root .blueprint-header-right-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--primary-blue);
+  letter-spacing: 0.5px;
+}
+
+.blueprint-report-root .blueprint-header-right-subtitle {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.blueprint-report-root .blueprint-meta-row {
+  font-size: 0.75rem;
+  font-weight: 600;
+  background-color: var(--bg-input);
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+.blueprint-report-root .blueprint-meta-item {
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .blueprint-meta-item i {
+  color: var(--primary-blue);
+}
+
+.blueprint-report-root .blueprint-meta-val {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.blueprint-report-root .section-title {
+  color: var(--text-primary);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+}
+
+.blueprint-report-root .blueprint-right-divider {
+  border-right: 1px solid var(--border-color);
+}
+
+@media (max-width: 991.98px) {
+  .blueprint-report-root .blueprint-right-divider {
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 16px;
+  }
+}
+
+.blueprint-report-root .blueprint-snapshot-banner {
+  min-height: 90px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.blueprint-report-root .blueprint-snapshot-alert-lbl {
+  font-size: 1.15rem;
+  letter-spacing: 0.5px;
+  font-weight: 800;
+}
+
+.blueprint-report-root .blueprint-snapshot-desc {
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .blueprint-text-highlight {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.blueprint-report-root .metric-card-box {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  text-align: center;
+  padding: 12px 4px;
+}
+
+.blueprint-report-root .metric-card-lbl {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .metric-card-val {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.blueprint-report-root .blueprint-badge-pill {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  font-family: monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 4px;
+}
+
+.blueprint-report-root .bp-badge-slate {
+  background-color: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .bp-badge-red {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--accent-red);
+}
+
+.blueprint-report-root .bp-badge-green {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: var(--accent-green);
+}
+
+.blueprint-report-root .bp-badge-amber {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: var(--accent-gold);
+}
+
+.blueprint-report-root .blueprint-scale-box {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+}
+
+.blueprint-report-root .blueprint-scale-title {
+  font-size: 0.725rem;
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .blueprint-scale-track {
+  height: 2px;
+  z-index: 1;
+  left: 10%;
+  right: 10%;
+  background-color: var(--border-color);
+}
+
+.blueprint-report-root .blueprint-scale-node {
+  z-index: 2;
+}
+
+.blueprint-report-root .scale-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.blueprint-report-root .scale-dot.active::after {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--text-primary);
+  position: absolute;
+  top: -4px;
+  left: -4px;
+}
+
+.blueprint-report-root .scale-dot-lbl {
+  font-size: 0.65rem;
+  letter-spacing: 0.3px;
+}
+
+.blueprint-report-root .strength-row-item {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.blueprint-report-root .strength-row-item i {
+  color: var(--accent-green);
+}
+
+.blueprint-report-root .strength-title {
+  color: var(--text-primary);
+}
+
+.blueprint-report-root .strength-desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .risk-circle-indicator {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.blueprint-report-root .risk-circle-red {
+  background-color: rgba(239, 68, 68, 0.15);
+  border: 2px solid var(--accent-red);
+  color: var(--accent-red);
+}
+
+.blueprint-report-root .risk-circle-yellow {
+  background-color: rgba(245, 158, 11, 0.15);
+  border: 2px solid var(--accent-gold);
+  color: var(--accent-gold);
+}
+
+.blueprint-report-root .risk-title {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.blueprint-report-root .risk-desc {
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .risk-action-lbl {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .enhancement-card {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-input);
+  height: 100%;
+}
+
+.blueprint-report-root .enhancement-header {
+  font-size: 0.825rem;
+  color: var(--primary-blue);
+  letter-spacing: 0.5px;
+}
+
+.blueprint-report-root .enhancement-list {
+  font-size: 0.775rem;
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .enhancement-why-box {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+  border-left: 3px solid var(--primary-blue);
+}
+
+.blueprint-report-root .action-number-badge {
+  width: 22px;
+  height: 22px;
+  background-color: var(--primary-blue);
+  color: var(--bg-dark);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.blueprint-report-root .action-step-text {
+  color: var(--text-secondary);
+  font-size: 0.825rem;
+}
+
+.blueprint-report-root .action-step-text strong {
+  color: var(--text-primary);
+}
+
+.blueprint-report-root .projection-scale-box {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+}
+
+.blueprint-report-root .projection-lbl {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .projection-arrow {
+  color: var(--text-secondary);
+}
+
+.blueprint-report-root .projection-badge {
+  display: inline-block;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border-radius: 4px;
+}
+
+.blueprint-report-root .projection-badge-danger {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: var(--accent-red);
+}
+
+.blueprint-report-root .projection-badge-success {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: var(--accent-green);
+}
+
+.blueprint-report-root .checkpoints-grid {
+  font-size: 0.775rem;
+  color: var(--accent-green);
+}
+
+.blueprint-report-root .blueprint-footer {
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border-radius: 0 0 12px 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.blueprint-report-root .blueprint-footer i {
+  color: var(--primary-blue);
+}
+
+/* ==========================================================================
+   17. COMPONENT: ACTION REQUIRED GRID
+   ========================================================================== */
+/* Previously a plain `d-flex flex-wrap gap-2` row of variable-width,
+   pill-sized buttons in admin/ops/ActionRequired.jsx — wrapped unevenly (a
+   row of 6 short labels, then a lonely row of 2 long ones), truncated
+   longer labels ("Missing Docu…"), and left a large dead zone of empty
+   space below since the tiles were too small to fill the panel next to the
+   taller Live Activity Feed card beside it.
+   Restyled as bigger stat tiles (big count + label, wrapping the way
+   Company Snapshot/Daily Metrics's cards already do elsewhere on this same
+   Overview tab) so the grid actually uses the available width and height
+   instead of leaving most of the card empty. */
+.action-required-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.75rem;
+}
+.action-required-grid .action-required-tile {
+  min-height: 96px;
+  padding: 14px 16px;
+  text-align: left;
+  align-items: flex-start !important;
+}
+.action-required-grid .action-required-tile-count {
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.action-required-grid .action-required-tile-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: normal;
+  line-height: 1.25;
+}

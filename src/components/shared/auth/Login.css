@@ -1,0 +1,28 @@
+/* .login-bg {
+     background-image: url("../assets/0_Abstract_Background_1080x1920.mp4");
+background-position: center bottom;
+    background-size: cover;
+    width: 100%;
+    background-repeat: no-repeat;
+} */
+.button-text-color, .button-text-color:hover {
+color: #0ea5e9;
+}
+.bg-video {
+      position: fixed; /* makes it true full screen */
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -1;
+  pointer-events: none; /* prevents interaction issues */
+}
+.login-bg::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: rgba(0.12, 0.14, 0.21, 0.8);
+}
