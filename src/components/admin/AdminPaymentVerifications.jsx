@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from "../../supabaseClient";
 import { Card, Table, Badge, Button, Spinner, Alert, Modal } from 'react-bootstrap';
 import { useToast } from "../shared/ui/ToastNotifier";
+import { markClientPaid } from "../../utils/markClientPaid";
 
 export default function AdminPaymentVerifications() {
   const { addToast } = useToast();
@@ -81,11 +82,22 @@ export default function AdminPaymentVerifications() {
       if (record.service_type === 'account_activation') {
           // The main subscription/portal-access receipt (see IndividualLayout.jsx's
           // lock screen) — this is the one that actually unlocks the portal, since
-          // isActivated there reads clients.is_paid directly.
-          await supabase
+          // isActivated there reads clients.is_paid directly. Routed through
+          // markClientPaid (not a bare `.update({is_paid:true})`) so this also
+          // resets bureau statuses, enrolls the client in Document Routing, and
+          // fires the paid webhooks — a bare update here was silently skipping
+          // Document Routing enrollment, which is exactly why some clients
+          // marked paid through this manual-receipt-approval flow never showed
+          // up in the Docs Routing queue. `record.clients` only carries
+          // full_name/email from the join above, so fetch the full row first —
+          // markClientPaid needs admin_id (for the routing assignment) too.
+          const { data: freshClient } = await supabase
             .from('clients')
-            .update({ is_paid: true })
-            .eq('id', record.client_id);
+            .select('*')
+            .eq('id', record.client_id)
+            .maybeSingle();
+          const { error: paidErr } = await markClientPaid(record.client_id, freshClient || {}, { triggerSource: "payment_verification_approval" });
+          if (paidErr) throw paidErr;
 
       } else if (record.service_type === 'vault') {
           await supabase

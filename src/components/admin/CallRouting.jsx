@@ -1,8 +1,15 @@
-import React, { useState, useEffect } from "react";
-import { Container, Card, Table, Form, Badge, Button, Spinner, Alert, Modal } from "react-bootstrap";
+import React, { useState, useEffect, useMemo } from "react";
+import { Container, Card, Table, Form, Badge, Button, Spinner, Alert, Modal, Nav } from "react-bootstrap";
 import { supabase } from "../../supabaseClient";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { resolveServiceId, SERVICES } from "../../utils/services";
 import LogCallModal from "./client-profile/modals/LogCallModal";
+
+// Optional service-type filter (the dropdown next to the round tabs) — NOT
+// a hard exclusion. Every paid client belongs in this queue regardless of
+// service; this only lets staff narrow the current view down to one
+// specific service (any of SERVICES) when useful. Same resolveServiceId()
+// every other service-aware read site in the app uses.
 
 const STATUS_OPTIONS = [
   { label: "NEW", color: "#f8d7da", textColor: "#721c24" },
@@ -39,11 +46,58 @@ export default function CallRouting() {
   // name } | null.
   const [activeCallLog, setActiveCallLog] = useState(null);
 
+  // Round tabs — same "one flat table mixing everything together was
+  // overwhelming" fix as DocumentRouting.jsx: group rows by round_count
+  // and show one round at a time via a plain Nav (decoupled from content,
+  // so the table below stays a single copy). Legacy rows with no round at
+  // all (bureau === null, pre-dating sql/add_bureau_call_routing.sql) get
+  // their own "No Round" tab rather than being dropped or force-fit into
+  // Round 1.
+  const [activeRound, setActiveRound] = useState(null); // string key into roundGroups, or null
+
+  const roundGroups = useMemo(() => {
+    const groups = {};
+    rows.forEach((r) => {
+      const key = r.roundCount ? String(r.roundCount) : "none";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    });
+    return groups;
+  }, [rows]);
+
+  const roundKeys = useMemo(() => {
+    const keys = Object.keys(roundGroups);
+    const numeric = keys.filter((k) => k !== "none").sort((a, b) => Number(a) - Number(b));
+    return roundGroups.none ? [...numeric, "none"] : numeric;
+  }, [roundGroups]);
+
+  useEffect(() => {
+    if (roundKeys.length === 0) {
+      setActiveRound(null);
+      return;
+    }
+    if (activeRound === null || !roundKeys.includes(activeRound)) {
+      setActiveRound(roundKeys[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roundKeys]);
+
+  // Optional narrowing on top of the selected round, same as
+  // DocumentRouting.jsx's dropdown — "all" (default) shows every client in
+  // this round exactly as before; any other value is a SERVICES id and
+  // narrows to just that service.
+  const [serviceFilter, setServiceFilter] = useState("all");
+
+  const roundRows = activeRound !== null ? (roundGroups[activeRound] || []) : [];
+  const visibleRows = serviceFilter === "all"
+    ? roundRows
+    : roundRows.filter((r) => r.serviceId === serviceFilter);
+
   useEffect(() => {
     const fetchLookups = async () => {
       const [profilesRes, clientsRes] = await Promise.all([
         supabase.from('profiles').select('id, full_name').order('full_name'),
-        supabase.from('clients').select('id, full_name').order('full_name')
+        supabase.from('clients').select('id, full_name, dispute_method, service_id').order('full_name')
       ]);
       if (profilesRes.data) setProfiles(profilesRes.data);
       if (clientsRes.data) setClientsList(clientsRes.data);
@@ -68,7 +122,7 @@ export default function CallRouting() {
         .from('call_routing')
         .select(`
             id, scheduled_date, assigned_admin_id, status, client_id, bureau, round_count,
-            clients (id, full_name, exp_status, tu_status, eq_status, admin_id, exp_completed, tu_completed, eq_completed)
+            clients (id, full_name, is_paused, exp_status, tu_status, eq_status, admin_id, exp_completed, tu_completed, eq_completed, dispute_method, service_id)
         `)
         .eq('status', 'PENDING')
         .lte('scheduled_date', selectedDate)
@@ -99,6 +153,8 @@ export default function CallRouting() {
                   bureau,
                   roundCount: task.round_count || null,
                   name: task.clients?.full_name || "Unknown Client",
+                  isPaused: !!task.clients?.is_paused,
+                  serviceId: task.clients ? resolveServiceId(task.clients) : null,
                   dueDate: task.scheduled_date,
                   assignedCallerId: task.assigned_admin_id || "",
                   docAdminId: task.clients?.admin_id || "",
@@ -110,7 +166,94 @@ export default function CallRouting() {
                   eqCompleted: task.clients?.eq_completed || false
               });
           });
-          setRows(formatted);
+
+          // Last Docs Submitted, per bureau — same document_logs source as
+          // DocumentRouting.jsx's Last Docs Submitted badges, but this list
+          // is naturally small (just clients with a PENDING call task today,
+          // not every paid client), so no chunking is needed here the way
+          // it was there. Unlike DocumentRouting.jsx, this also keeps the
+          // FULL bureau list from each log entry (`bureaus`), not just the
+          // one matching this row's own bureau — "which docs were
+          // submitted" here means telling the caller whether this bureau's
+          // docs went out ALONE or bundled with another bureau's, since
+          // that context is exactly what tells them whether a TU/EQ call
+          // might also be coming due soon.
+          const docClientIds = [...new Set(formatted.map(r => r.clientId).filter(Boolean))];
+          const lastDocsSubmittedByClient = {}; // client_id -> { EXP: {submittedAt, bureaus}, TU: {...}, EQ: {...} }
+          if (docClientIds.length > 0) {
+            const { data: docLogs, error: docLogsErr } = await supabase
+              .from('document_logs')
+              .select('client_id, submitted_at, bureau')
+              .in('client_id', docClientIds)
+              .not('submitted_at', 'is', null)
+              .order('submitted_at', { ascending: false });
+            if (docLogsErr) {
+              console.warn('Could not load document_logs for Last Docs Submitted:', docLogsErr.message);
+            } else {
+              (docLogs || []).forEach(log => {
+                const bureausInLog = (Array.isArray(log.bureau) ? log.bureau : [])
+                  .map(b => String(b || '').toUpperCase().trim())
+                  .filter(b => ['EXP', 'TU', 'EQ'].includes(b));
+                if (bureausInLog.length === 0) return;
+                if (!lastDocsSubmittedByClient[log.client_id]) lastDocsSubmittedByClient[log.client_id] = {};
+                const perClient = lastDocsSubmittedByClient[log.client_id];
+                bureausInLog.forEach(b => {
+                  if (perClient[b]) return; // already have a more recent one (ordered desc above)
+                  perClient[b] = { submittedAt: log.submitted_at, bureaus: bureausInLog };
+                });
+              });
+            }
+          }
+          // A legacy bureau===null row covers all three bureaus at once
+          // (pre-dates sql/add_bureau_call_routing.sql), so it has no
+          // single bureau to key into — show whichever of EXP/TU/EQ was
+          // submitted most recently for that client instead.
+          const mostRecentAcrossBureaus = (perClient) => {
+            if (!perClient) return null;
+            return Object.values(perClient).sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt))[0] || null;
+          };
+          formatted.forEach(r => {
+            const perClient = lastDocsSubmittedByClient[r.clientId];
+            r.lastDocsSubmitted = r.bureau
+              ? (perClient?.[r.bureau.toUpperCase()] || null)
+              : mostRecentAcrossBureaus(perClient);
+          });
+
+          // Self-heal stuck rows: this row's own `status` (PENDING/COMPLETED)
+          // and the client's per-bureau `*_completed` flag are two separate
+          // fields that are supposed to move together — Log Call normally
+          // flips both at once (see LogCallModal.jsx's handleWorkflowSideEffects,
+          // which sets `${bureau}_completed = true` on a DELETED result AND
+          // closes the routing row in the same submit). But a bureau can end
+          // up marked done/DELETED through some OTHER path (a duplicate call
+          // task for the same client+bureau that got logged instead of this
+          // one, a direct status edit, etc.) without ever touching THIS row,
+          // leaving it stuck showing "PENDING" — with a resolved status pill
+          // right next to it — forever, until someone notices and clicks
+          // Mark Done by hand. Auto-closing it here the moment the fetch
+          // sees that mismatch means nobody has to catch it manually. A
+          // legacy bureau===null row (pre-dates per-bureau call_routing)
+          // covers all three, so it only self-heals once EXP/TU/EQ are all
+          // resolved — same "covers all three" rule this screen already
+          // uses elsewhere (e.g. the dimmed-pill logic below).
+          const isResolved = (row) => {
+              if (row.bureau === 'exp') return row.expCompleted;
+              if (row.bureau === 'tu') return row.tuCompleted;
+              if (row.bureau === 'eq') return row.eqCompleted;
+              return row.expCompleted && row.tuCompleted && row.eqCompleted;
+          };
+          const staleIds = formatted.filter(isResolved).map(r => r.id);
+          const liveRows = formatted.filter(r => !isResolved(r));
+
+          setRows(liveRows);
+
+          if (staleIds.length > 0) {
+            console.warn(`CallRouting: auto-closing ${staleIds.length} call_routing row(s) whose bureau was already resolved elsewhere (stuck PENDING despite a completed status).`, staleIds);
+            supabase.from('call_routing').update({ status: 'COMPLETED' }).in('id', staleIds)
+              .then(({ error: closeErr }) => {
+                if (closeErr) console.warn('Could not auto-close resolved call_routing row(s):', closeErr.message);
+              });
+          }
       }
       setLoading(false);
     };
@@ -258,15 +401,43 @@ const handleAddCall = async () => {
         </div>
       </div>
 
-      {loading ? <div className="text-center p-5"><Spinner animation="border"/></div> : 
+      {loading ? <div className="text-center p-5"><Spinner animation="border"/></div> :
        rows.length === 0 ? <Alert variant="success" className="text-center">No calls due for {selectedDate}.</Alert> : (
         <Card className="shadow-sm border-0">
+            <Card.Header className="bg-white pt-3 pb-0 border-bottom-0 d-flex flex-wrap justify-content-between align-items-end gap-2">
+              <Nav variant="tabs" activeKey={activeRound} onSelect={(k) => setActiveRound(k)} className="border-bottom-0">
+                {roundKeys.map((k) => (
+                  <Nav.Item key={k}>
+                    <Nav.Link eventKey={k}>
+                      {k === "none" ? "No Round" : `Round ${k}`}
+                      <Badge bg="secondary" className="ms-2">{roundGroups[k].length}</Badge>
+                    </Nav.Link>
+                  </Nav.Item>
+                ))}
+              </Nav>
+              {/* Optional narrowing, never a hard filter — "All Services"
+                  always shows every client in the round above; picking a
+                  specific service just narrows that same list down. */}
+              <Form.Select
+                size="sm"
+                className="mb-2"
+                style={{ maxWidth: 220 }}
+                value={serviceFilter}
+                onChange={(e) => setServiceFilter(e.target.value)}
+              >
+                <option value="all">All Services</option>
+                {SERVICES.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </Form.Select>
+            </Card.Header>
             <Card.Body className="p-0">
                 <Table responsive hover className="mb-0 align-middle">
                     <thead className="bg-dark text-white">
                         <tr>
                             <th className="py-3 ps-4">Client Name</th>
                             <th className="py-3 text-center">Due Date</th>
+                            <th className="py-3 text-center">Last Docs Submitted</th>
                             <th className="py-3 text-center">Assign & Dispatch</th>
                             <th className="py-3 text-center">Experian</th>
                             <th className="py-3 text-center">TransUnion</th>
@@ -275,7 +446,9 @@ const handleAddCall = async () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {rows.map((row) => {
+                        {visibleRows.length === 0 ? (
+                          <tr><td colSpan="8" className="text-center p-4 text-muted">No calls due in this round.</td></tr>
+                        ) : visibleRows.map((row) => {
                             return (
                             <tr key={row.id} style={{borderBottom: '1px solid #f0f0f0'}}>
                                 <td className="ps-4 fw-bold text-uppercase text-secondary">
@@ -287,12 +460,46 @@ const handleAddCall = async () => {
                                     ) : (
                                         <Badge bg="secondary" className="ms-2 align-middle">ALL BUREAUS</Badge>
                                     )}
+                                    {row.isPaused && (
+                                        <Badge bg="warning" text="dark" className="ms-2 align-middle" title="Service is paused for this client — same is_paused flag shown on their profile.">
+                                            <i className="bi bi-pause-fill me-1"></i>PAUSED
+                                        </Badge>
+                                    )}
                                     <div className="text-muted small fw-normal mt-1"><i className="bi bi-person-workspace me-1"></i>Doc Admin: {getProfileName(row.docAdminId)}</div>
                                 </td>
                                 <td className="text-center">
                                     <Badge bg={row.dueDate < new Date().toISOString().split('T')[0] ? 'danger' : 'success'}>
                                         {row.dueDate}
                                     </Badge>
+                                </td>
+
+                                {/* Last time ANY docs were logged for this row's bureau
+                                    (document_logs — same source DocumentRouting.jsx's badge
+                                    reads), plus which OTHER bureaus were bundled into that
+                                    same submission — tells the caller whether this bureau's
+                                    docs went out alone or came with another bureau's, which
+                                    is a signal that bureau might be coming due for a call
+                                    soon too. A legacy "ALL BUREAUS" row has no single bureau
+                                    to key into, so it shows whichever bureau was submitted
+                                    most recently instead (see mostRecentAcrossBureaus above). */}
+                                <td className="text-center small">
+                                    {row.lastDocsSubmitted ? (
+                                        <div>
+                                            <Badge bg="light" text="dark" className="border fw-normal d-inline-block mb-1" style={{ fontSize: "0.68rem" }}>
+                                                <i className="bi bi-file-earmark-text me-1"></i>
+                                                {new Date(row.lastDocsSubmitted.submittedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                                            </Badge>
+                                            <div className="d-flex gap-1 justify-content-center flex-wrap">
+                                                {row.lastDocsSubmitted.bureaus.map((b) => (
+                                                    <Badge key={b} bg="secondary" style={{ fontSize: "0.6rem" }} title="Bureau included in that same document submission">
+                                                        {b}
+                                                    </Badge>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <span className="text-muted fst-italic">Never</span>
+                                    )}
                                 </td>
 
                                 {/* ACTION 1: DISPATCH COLUMN */}

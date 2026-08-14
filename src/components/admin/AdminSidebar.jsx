@@ -12,11 +12,23 @@ export default function AdminSidebar({ isSidebarOpen, setIsSidebarOpen }) {
   const { isDeveloper, userId, hasAnyPermission } = useAuth();
   const location = useLocation();
 
-  const canSeeActivitySection = hasAnyPermission([
-    'view_call_queue', 'complete_call_task', 'count_inquiries', 'view_credit_reports',
-  ]);
-  const canSeeCallCenter = hasAnyPermission(['view_call_queue', 'complete_call_task']);
+  // Activity now covers only Inquiry Deletion tracking (Count Inquiries) —
+  // the primary thing this dashboard tracks — plus Support Console/AI
+  // Simulation, which aren't tied to either service specifically. Everything
+  // that drives the Case Management (credit_repair) dispute-round/bureau-
+  // calling cycle (Call Routing, Call Queue, Pending Callbacks, Docs
+  // Routing, Outstanding Clients) has its own section below instead, so the
+  // two workflows aren't mixed together in one flat list.
+  // Support Console handles ANY caller (leads, existing clients regardless
+  // of service — see utils/supportConstants.js's CALLER_TYPES), so it's not
+  // Case-Management-specific; kept here gated on its own actual route
+  // permission (App.jsx: view_call_queue OR view_clients) rather than
+  // canSeeCallCenter below.
+  const canSeeActivitySection = hasAnyPermission(['view_call_queue', 'view_clients', 'count_inquiries', 'view_credit_reports', 'settings']);
+  const canSeeSupportConsole = hasAnyPermission(['view_call_queue', 'view_clients']);
   const canSeeCounting = hasAnyPermission(['count_inquiries', 'view_credit_reports']);
+  const canSeeCallCenter = hasAnyPermission(['view_call_queue', 'complete_call_task']);
+  const canSeeCaseManagementSection = hasAnyPermission(['view_call_queue', 'complete_call_task', 'view_documents']);
 
   const canSeeManagementSection = hasAnyPermission([
     'view_employees', 'add_employees', 'view_partners', 'billing', 'view_clients',
@@ -85,29 +97,54 @@ export default function AdminSidebar({ isSidebarOpen, setIsSidebarOpen }) {
             </ul>
           )}
 
-          {/* ACTIVITY SECTION */}
+          {/* ACTIVITY SECTION — Inquiry Deletion tracking (the main service
+              this dashboard tracks) plus general, not-service-specific
+              tools. Case Management's own workflow lives in its own
+              section below instead of mixed in here. */}
           {!isDeveloper && canSeeActivitySection && (
             <>
               <div className={`sidebar-section-title text-uppercase fw-bold mb-2 px-3 ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}>
                 Activity
               </div>
               <ul className="nav flex-column mb-4">
+                {canSeeSupportConsole && (
+                  <NavItem path="/support-console" icon="bi-life-preserver" label="Support Console" iconClass="text-info" />
+                )}
+                {canSeeCounting && (
+                  <NavItem path="/identify-inquiries" icon="bi-123" label="Count Inquiries" />
+                )}
+                {hasAnyPermission(['settings']) && (
+                  <NavItem path="/ai-testing" icon="bi-robot" label="AI Simulation" />
+                )}
+              </ul>
+            </>
+          )}
+
+          {/* CASE MANAGEMENT SECTION — everything that drives the Case
+              Management (credit_repair) service's FTC/CFPB + EXP/TU/EQ
+              dispute-round/bureau-calling cycle (see utils/services.js).
+              Kept apart from Activity/Inquiry Deletion since the two
+              services' workflows don't overlap — DocumentRouting.jsx/
+              CallRouting.jsx/OutstandingClients.jsx are all scoped to
+              Case Management clients only. */}
+          {!isDeveloper && canSeeCaseManagementSection && (
+            <>
+              <div className={`sidebar-section-title text-uppercase fw-bold mb-2 px-3 ${isSidebarOpen ? 'opacity-100' : 'opacity-0'}`}>
+                Case Management
+              </div>
+              <ul className="nav flex-column mb-4">
                 {canSeeCallCenter && (
                   <>
-                    <NavItem path="/support-console" icon="bi-life-preserver" label="Support Console" iconClass="text-info" />
                     <NavItem path="/pending-callbacks" icon="bi-telephone-forward" label="Pending Callbacks" />
                     <NavItem path="/call-routing" icon="bi-headset" label="Call Routing" />
                     <NavItem path="/call-queue" icon="bi-list-ol" label="Call Queue" />
                   </>
                 )}
-                {canSeeCounting && (
-                  <NavItem path="/identify-inquiries" icon="bi-123" label="Count Inquiries" />
-                )}
                 {hasAnyPermission(['view_documents']) && (
                   <NavItem path="/docs-routing" icon="bi-file-earmark-text" label="Docs Routing" />
                 )}
-                {hasAnyPermission(['settings']) && (
-                  <NavItem path="/ai-testing" icon="bi-robot" label="AI Simulation" />
+                {hasAnyPermission(['view_documents']) && (
+                  <NavItem path="/outstanding-clients" icon="bi-hourglass-split" label="Outstanding Clients" />
                 )}
               </ul>
             </>

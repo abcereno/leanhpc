@@ -76,10 +76,12 @@ function buildPrompt(docType: string, clientName: string | undefined, today: str
 
   const typeSpecificRules =
     docType === 'license'
-      ? `- US driver's licenses/state IDs print TWO dates close together and easy to mix up: an issue date (labeled "ISS" or "ISD", sometimes numbered field 4a) and an expiration date (labeled "EXP", sometimes numbered field 4b). These are DIFFERENT dates — the issue date is always in the past and never means the document has expired. Only the "EXP" date matters for this check.
-- Extract the expiration date printed on the ID — the one labeled "EXP", not "ISS"/"ISD". The expiration date is always later than the issue date; if the date you're about to call "expiration" is actually earlier than the issue date on the same card, you have the two fields backwards — re-read the card and use the correct one.
-- Also extract the issue date if visible, so it can be cross-checked.
-- Today's date is ${today}. If the (correctly identified) expiration date is before today, status must be "expired".
+      ? `- US driver's licenses/state IDs print numbered fields — field "4a" is ISS (issue date) and field "4b" is EXP (expiration date). These sit right next to each other and are easy to swap. You MUST use the value next to "4b" / "EXP" for expiration — NEVER the value next to "4a" / "ISS", even if it visually appears first, is printed larger, or is closer to the top of that block of text. The issue date (4a/ISS) is always in the past and never means the document has expired; it is irrelevant to whether this ID is expired.
+- Locate the text label "EXP" (or "4b") specifically before reading any date. Read the date immediately next to THAT label. Do this before you look at "ISS"/"4a" at all, to avoid anchoring on the wrong field.
+- Cross-check: the expiration date must always be LATER than the issue date (typically by 4-8 years for a standard license, longer for some state IDs). If the date you're about to call "expiration" is earlier than — or only a couple years after — the issue date, you very likely have the two fields swapped. Re-read the card and use the correct field.
+- Extract BOTH dates: the field you determined is EXP goes in "expiresAt", and the field you determined is ISS goes in "issuedAt". Do not leave "issuedAt" blank if it's printed on the card — it's required for a license so this can be double-checked.
+- Read every digit of each date individually rather than pattern-matching the whole number at once — printed digits like 3/8, 0/6/8/9, and 1/7 are easy to confuse at a glance, especially in the year. If any single digit is blurry, glared, or you're not fully certain of it, treat the date as unreadable for that digit rather than guessing — use "needs_review" instead of a confident but possibly wrong date.
+- Today's date is ${today}. If the (correctly identified, field-4b) expiration date is before today, status must be "expired".
 - If the image is not actually a license/state ID, or is too illegible to read the expiration date, status must be "invalid" (not readable at all) or "needs_review" (readable but you're not fully confident).
 - Otherwise, if it's clearly a valid, unexpired license, status is "valid".`
       : docType === 'poa'
@@ -89,7 +91,9 @@ function buildPrompt(docType: string, clientName: string | undefined, today: str
 - If you can't confidently read the date or the document type, status must be "needs_review".
 - Otherwise, if it's a valid, recent proof-of-address document, status is "valid".`
       : `- Confirm this is genuinely a Social Security card (not some other ID). SSN cards do not expire, so no date check applies.
-- If the image is clearly not an SSN card, status must be "invalid". If it's illegible or you're not confident, status must be "needs_review".
+- SSN cards are small, plain, and easy to photograph poorly (glare, tilted angle, partial finger covering a digit, slight blur) — none of that alone makes it "invalid". Judge the DOCUMENT TYPE and whether the name is legible, not photo quality. A card that's readable enough to confirm it's an SSN card and read the name should be "valid" even if the photo isn't perfectly crisp.
+- Only use "invalid" when the image is clearly a DIFFERENT kind of document entirely (a license, a blank/random photo, something unrelated) — not for a genuine SSN card that's merely a mediocre phone photo.
+- If you can tell it's an SSN card but genuinely cannot read the name or confirm it's legitimate (heavy glare over the whole card, extreme blur, etc.), use "needs_review" instead of "invalid" — that's the "readable but not confident" case, distinct from "wrong document".
 - Otherwise, if it's clearly a legible, genuine SSN card, status is "valid".`;
 
   return `You are reviewing an uploaded image that is supposed to be ${label}.
@@ -168,10 +172,12 @@ function buildCategoryPrompt(
 ${typeList}
 
 - First determine which of the above it is (set "detectedType" to the matching key, or "unknown" if you can't tell or it's none of these).
-- Driver's licenses/state IDs print TWO dates close together and easy to mix up: an issue date (labeled "ISS" or "ISD", sometimes field 4a) and an expiration date (labeled "EXP", sometimes field 4b). These are DIFFERENT dates — the issue date is always in the past and never means the document has expired. Only the "EXP" date matters here.
-- Extract the expiration date printed on the document — the one labeled "EXP", not "ISS"/"ISD". It's always later than the issue date; if the date you're about to call "expiration" is earlier than the issue date on the same document, you have the two fields backwards — re-read it and use the correct one. (Passports print only one expiration date, no issue-date mix-up risk there.)
-- Also extract the issue date if visible (licenses/state IDs only), so it can be cross-checked.
-- Today's date is ${today}. If the (correctly identified) expiration date is before today, status must be "expired" — photo ID must be current, never expired.
+- Driver's licenses/state IDs print numbered fields — field "4a" is ISS (issue date) and field "4b" is EXP (expiration date). These sit right next to each other and are easy to swap. You MUST use the value next to "4b" / "EXP" for expiration — NEVER the value next to "4a" / "ISS", even if it visually appears first, is printed larger, or is closer to the top of that block of text. The issue date (4a/ISS) is always in the past and never means the document has expired; it is irrelevant to whether this ID is expired.
+- Locate the text label "EXP" (or "4b") specifically before reading any date. Read the date immediately next to THAT label. Do this before you look at "ISS"/"4a" at all, to avoid anchoring on the wrong field. (Passports print only one expiration date, no issue-date mix-up risk there.)
+- Cross-check (licenses/state IDs only): the expiration date must always be LATER than the issue date, typically by 4-8 years for a standard license, longer for some state IDs. If the date you're about to call "expiration" is earlier than — or only a couple years after — the issue date, you very likely have the two fields swapped. Re-read the card and use the correct field.
+- Extract BOTH dates for licenses/state IDs: the field you determined is EXP goes in "expiresAt", and the field you determined is ISS goes in "issuedAt". Do not leave "issuedAt" blank if it's printed on the card — it's required so this can be double-checked. (Not applicable to passports, which don't print an issue date.)
+- Read every digit of each date individually rather than pattern-matching the whole number at once — printed digits like 3/8, 0/6/8/9, and 1/7 are easy to confuse at a glance, especially in the year. If any single digit is blurry, glared, or you're not fully certain of it, treat the date as unreadable for that digit rather than guessing — use "needs_review" instead of a confident but possibly wrong date.
+- Today's date is ${today}. If the (correctly identified, field-4b for licenses/state IDs) expiration date is before today, status must be "expired" — photo ID must be current, never expired.
 - If the image is not actually one of the listed identity documents, or is too illegible to read, status must be "invalid" (not readable / wrong document) or "needs_review" (readable but you're not fully confident).
 - Otherwise, if it's clearly a valid, unexpired document from the list, status is "valid".`;
   } else if (category === 'address') {
@@ -288,9 +294,42 @@ serve(async (req) => {
     // that instruction. Downgrades to "needs_review" instead of silently
     // flipping to "valid" — still surfaces for a human to double-check
     // rather than guessing which date is actually correct.
-    if (expiresAt && issuedAt && expiresAt <= issuedAt && (docType === 'license' || category === 'identity')) {
+    // Applies to licenses/state IDs specifically — passports have no
+    // issue-date field to cross-check against, so they're excluded here.
+    const isLicenseLike = docType === 'license' || (category === 'identity' && (detectedType === 'driver_license' || detectedType === 'state_id'));
+    if (expiresAt && issuedAt && expiresAt <= issuedAt && isLicenseLike) {
       status = 'needs_review';
       reasoning = `${reasoning} [Auto-flagged: the extracted expiration date (${expiresAt}) is not after the extracted issue date (${issuedAt}) — likely read the wrong date field (ISS vs EXP). Please verify manually.]`.trim();
+    } else if (expiresAt && !issuedAt && isLicenseLike && status !== 'invalid' && status !== 'needs_review') {
+      // The model reported an expiration date but never extracted an issue
+      // date at all — the pair-based check above can't run, so this read
+      // is unverified. Rather than trust a single unchecked date (which is
+      // exactly how a wrong-field read slips through as "valid"/"expired"),
+      // downgrade so a human confirms which field was actually read.
+      status = 'needs_review';
+      reasoning = `${reasoning} [Auto-flagged: no issue date (ISS/4a) was extracted alongside the expiration date, so the ISS-vs-EXP read couldn't be cross-checked. Please verify manually.]`.trim();
+    }
+
+    // Deterministic valid/expired override for identity documents with a
+    // real printed expiration date (licenses, state IDs, passports).
+    // Reported bug: the model correctly extracted expiresAt = 2028-12-23
+    // (a date over two years in the future) but still reasoned "the
+    // expiration date is before today... the license is expired" — a pure
+    // date-comparison error, not a misread. LLMs are unreliable at doing
+    // calendar arithmetic in prose, so once we trust the extracted
+    // expiresAt (it already survived the ISS/EXP checks above), the
+    // valid-vs-expired call itself should never be left to the model's own
+    // reasoning — a string compare in code can't get this wrong. Only
+    // applies when status is currently "valid" or "expired" (i.e. the
+    // model made a date-based call at all); "invalid"/"needs_review" are
+    // left alone since those aren't date-comparison outcomes.
+    const isExpirationDoc = docType === 'license' || (category === 'identity' && (detectedType === 'driver_license' || detectedType === 'state_id' || detectedType === 'passport'));
+    if (isExpirationDoc && expiresAt && (status === 'valid' || status === 'expired')) {
+      const correctStatus = expiresAt < effectiveToday ? 'expired' : 'valid';
+      if (correctStatus !== status) {
+        reasoning = `${reasoning} [Auto-corrected: model reported "${status}" but the extracted expiration date (${expiresAt}) is ${correctStatus === 'expired' ? 'before' : 'not before'} today (${effectiveToday}), so status was corrected to "${correctStatus}".]`.trim();
+        status = correctStatus;
+      }
     }
 
     return new Response(

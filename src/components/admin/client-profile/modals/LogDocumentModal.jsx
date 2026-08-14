@@ -142,6 +142,51 @@ export default function LogDocumentModal({ show, onClose, clientId, initialBurea
       return;
     }
 
+    // Sync Docs Routing's own EXP/TU/EQ "submitted" checkbox for whichever
+    // bureaus were logged here. DocumentRouting.jsx's checkbox click
+    // already does this itself via its `onLogged` callback below (it opens
+    // this modal, then flips its OWN task's checkbox on success) — but
+    // this modal is also opened from the client profile page/Reminders
+    // Sidebar (ClientHeader.jsx, RemindersSidebar.jsx), and neither of
+    // those pass `onLogged` or know which document_routing row to update.
+    // A doc logged from either of those left a real document_logs row
+    // (which is what Docs Routing's "Last Docs Submitted" badge reads) but
+    // never touched the checkbox — so staff would see a badge proving docs
+    // went out, sitting right next to a checkbox that still says they
+    // didn't. Doing the sync here, not just in DocumentRouting.jsx, fixes
+    // it regardless of which screen the log was made from. Targets
+    // whichever document_routing row is this client's current PENDING
+    // round (same tie-break as sql/self_healing_workflow_queues.sql: the
+    // highest round_count, most-recently-created if that's ambiguous) —
+    // a no-op if there isn't one (e.g. already fully done), same
+    // warning-only precedent as everything else in this modal.
+    if (selectedBureaus.length > 0) {
+      try {
+        const { data: latestRound } = await supabase
+          .from("document_routing")
+          .select("id")
+          .eq("client_id", clientId)
+          .eq("status", "PENDING")
+          .order("round_count", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (latestRound?.id) {
+          const routingUpdates = {};
+          selectedBureaus.forEach((b) => {
+            routingUpdates[`${b.toLowerCase()}_submitted`] = true;
+          });
+          const { error: routingErr } = await supabase
+            .from("document_routing")
+            .update(routingUpdates)
+            .eq("id", latestRound.id);
+          if (routingErr) console.error("Failed to sync document_routing submitted checkbox:", routingErr.message);
+        }
+      } catch (e) {
+        console.error("document_routing checkbox sync exception:", e?.message || e);
+      }
+    }
+
     // ✅ Clear the reminder now (Option B: RPC). Null = clear all, else partial clear.
     try {
       const { error: clearErr } = await supabase.rpc("clear_docs_reminder", {

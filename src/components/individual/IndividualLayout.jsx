@@ -6,6 +6,7 @@ import { Spinner, Navbar, Offcanvas, Button, Ratio } from "react-bootstrap";
 import { useClient } from "../../hooks/useClient";
 import { useClientCreditFiles } from "../../hooks/useClientCreditFiles";
 import { deriveServiceId } from "../../utils/services";
+import { markClientPaid } from "../../utils/markClientPaid";
 
 import { Joyride, STATUS } from 'react-joyride';
 
@@ -244,7 +245,14 @@ export default function IndividualLayout() {
             }
 
             if (type === 'custom_service') {
-                await supabase.from('clients').update({ is_paid: true }).eq('id', clientId);
+                // markClientPaid (not a bare `.update({is_paid:true})`) so this
+                // Stripe-checkout activation also resets bureau statuses, enrolls
+                // the client in Document Routing, and fires the paid webhooks —
+                // a bare update here was the exact "marked paid but never shows
+                // up in Docs Routing" gap the rest of the paid-marking call sites
+                // (useClientActions.js, AdminNewLeads.jsx, MoveForwardModal.jsx)
+                // already avoid.
+                await markClientPaid(clientId, client || {}, { triggerSource: "stripe_custom_service" });
                 await refetchClient();
                 addToast({ title: "Account Activated", message: "Welcome to the luxury experience.", variant: "success", icon: "bi-gem" });
             }

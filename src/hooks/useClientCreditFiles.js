@@ -105,7 +105,14 @@ export function useClientCreditFiles(clientId, refreshKey = 0, selectedFile = nu
 
       if (activeReport && isCompleteAuditShape(activeReport)) {
         calculatedAudit = activeReport;
-      } else if (reportA || reportB) {
+      } else if (!selectedFile && (reportA || reportB)) {
+        // Only re-derive from raw reports when viewing the LATEST report
+        // (!selectedFile). reportA/reportB are always the CURRENT raw
+        // files, not whatever raw data produced a given historical
+        // snapshot — recomputing a historical snapshot from them would
+        // silently show present-day data mislabeled as that old date. A
+        // historical snapshot with the old incomplete shape instead falls
+        // through to the branch below and is shown as-is.
         try {
           const validReport = reportA || reportB;
           calculatedAudit = runAuditEngine(validReport);
@@ -117,9 +124,10 @@ export function useClientCreditFiles(clientId, refreshKey = 0, selectedFile = nu
           console.error("❌ Error running audit engine:", err);
         }
       } else if (activeReport) {
-        // No raw report to re-derive from — better to show the old,
-        // incomplete data than nothing at all.
-        console.warn(`⚠️ client_audit_report.json for ${clientId} is in the old incomplete shape, and no raw report exists to rebuild it from.`);
+        // No raw report to re-derive from (or this is a historical
+        // snapshot, where re-deriving from current raw data would be
+        // wrong) — better to show the old, incomplete data than nothing.
+        console.warn(`⚠️ client_audit_report.json for ${clientId} is in the old incomplete shape${selectedFile ? " (historical snapshot)" : ""}, and no raw report exists to rebuild it from.`);
         calculatedAudit = activeReport;
       } else {
         console.warn(`⚠️ No credit report found for ${clientId}.`);

@@ -65,6 +65,7 @@ import ClientDocumentDashboard from "./components/admin/customer-service/ClientD
 
 // Admin Specific
 import DocumentRouting from "./components/admin/DocumentRouting";
+import OutstandingClients from "./components/admin/OutstandingClients";
 import AddEmployee from "./components/admin/AddEmployee";
 import PendingApprovals from "./components/admin/PendingApprovals";
 import CallRouting from "./components/admin/CallRouting";
@@ -283,6 +284,7 @@ function AppRoutes() {
             <Route element={<PermissionGuard permissions={['view_documents']} />}>
               <Route path="/document-submissions" element={<DocumentLogs />} />
               <Route path="/docs-routing" element={<DocumentRouting />} />
+              <Route path="/outstanding-clients" element={<OutstandingClients />} />
             </Route>
 
             <Route element={<PermissionGuard permissions={['reports', 'analytics']} />}>
