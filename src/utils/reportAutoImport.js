@@ -37,6 +37,8 @@
 import { supabase } from "../supabaseClient";
 import { runAuditEngine } from "./auditEngine";
 import { computeBureauProgress } from "./inquiryCounts";
+import { saveInitialAudit } from "./reportStorage";
+import { buildThreadFromAudit } from "./buildThreadFromAudit";
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -97,6 +99,14 @@ async function saveThreadAndFlags(clientId, { accounts, experian, transunion, eq
 export async function runSmartCreditImport(clientId, { email, password }, counterName) {
   const creds = { email: email.trim(), password: password.trim() };
 
+  // Single login: fetch_3b_raw is the only step that actually authenticates
+  // with SmartCredit. credit_analysis and fetch_3b_report both used to log
+  // in separately to re-fetch the identical report — three logins for one
+  // import, tripling exposure to SmartCredit's Cloudflare bot-challenge.
+  // Both edge functions now accept the already-fetched raw report via
+  // `rawReport` and skip their own login when it's present (see their
+  // 2026-08-20 header notes), falling back to `creds` only if this fetch
+  // failed and rawData stayed null.
   const rawRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch_3b_raw`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
@@ -105,20 +115,17 @@ export async function runSmartCreditImport(clientId, { email, password }, counte
   if (!rawRes.ok) {
     throw new Error("Invalid credentials or verification failed. Report provider blocked the login.");
   }
+  let rawData = null;
   const contentType = rawRes.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
     const json = await rawRes.json();
-    const rawData = json.report || json;
-    if (rawData) {
-      const blob = new Blob([JSON.stringify(rawData, null, 2)], { type: "application/json" });
-      await supabase.storage.from("clients").upload(`${clientId}/raw_credit_report.json`, blob, { upsert: true, contentType: "application/json" });
-    }
+    rawData = json.report || json;
   }
 
   const analRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/credit_analysis`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
-    body: JSON.stringify({ ...creds, months: 24 }),
+    body: JSON.stringify(rawData ? { rawReport: rawData, months: 24 } : { ...creds, months: 24 }),
   });
   const analysis = await analRes.json();
   if (analRes.ok && analysis) {
@@ -129,13 +136,28 @@ export async function runSmartCreditImport(clientId, { email, password }, counte
     await supabase.storage.from("clients").upload(`${clientId}/credit_analysis.parsed.json`, parsedBlob, { upsert: true, contentType: "application/json" });
   }
 
-  const threadRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch_3b_report`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
-    body: JSON.stringify(creds),
-  });
-  const threadData = await threadRes.json();
-  if (!threadRes.ok || !threadData?.success) throw new Error(threadData?.error || "3B Thread fetch failed");
+  // Day-0 baseline: writes raw_credit_report.json (the canonical "current
+  // report" file), client_audit_report.json, today's progress snapshot,
+  // and the first score-history entry — see utils/reportStorage.js. Without
+  // this, a brand-new client needed a second report update before Progress
+  // Report had two snapshots to compare against. Non-fatal: thread.json
+  // and the client's progress flags (saveThreadAndFlags below) are what
+  // actually make intake succeed, so a failure here shouldn't block it.
+  if (rawData) {
+    try {
+      await saveInitialAudit(clientId, rawData, analysis);
+    } catch (auditErr) {
+      console.warn("Could not save initial audit snapshot:", auditErr);
+    }
+  }
+
+  // Thread payload used to come from a THIRD separate SmartCredit login via
+  // fetch_3b_report — redundant now that rawData is already in hand and can
+  // be parsed locally with the same auditEngine.js every other display
+  // surface uses. See utils/buildThreadFromAudit.js.
+  if (!rawData) throw new Error("Could not retrieve raw report. Please try again.");
+  const auditResult = runAuditEngine(rawData);
+  const threadData = buildThreadFromAudit(auditResult);
 
   return saveThreadAndFlags(clientId, threadData, counterName);
 }

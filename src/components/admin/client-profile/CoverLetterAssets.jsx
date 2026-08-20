@@ -15,9 +15,25 @@ const SIGNED_URL_TTL = 60 * 60 * 24 * 30; // 30 days
 // plus a manual "Check Validity" button per asset for documents already
 // on file from before this existed.
 
-export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
+// `showAiResults` (default true — the admin client profile, the only
+// call site that doesn't pass this explicitly) gates whether the AI
+// validity/alignment check badge and its manual "Check Validity" trigger
+// are rendered at all. Partners (MoveForwardModal.jsx, ClientProfilePage.jsx)
+// and individuals (ProfileStep2.jsx) pass showAiResults={false} — product
+// decision: admins review AI results themselves and follow up with the
+// client/partner directly rather than surfacing raw AI output to them.
+// The check itself still runs automatically after upload either way (so
+// the result is waiting for an admin the next time they open this same
+// client) — only the rendering and the result-revealing toast are gated,
+// never the underlying check.
+export default function CoverLetterAssets({ clientId, onChange, refreshKey, showAiResults = true }) {
   const [loading, setLoading] = useState(false);
-  const [clientName, setClientName] = useState("Client"); 
+  const [clientName, setClientName] = useState("Client");
+  // On file, for the Alignment Check (SSN match on the 'ssn' doc, address
+  // match on the 'poa' doc) — fetched alongside the name below rather than
+  // a second round trip.
+  const [clientSsn, setClientSsn] = useState("");
+  const [clientAddress, setClientAddress] = useState("");
   
   const [assets, setAssets] = useState({
     license: { path: null, signedUrl: null, validation: null },
@@ -39,12 +55,16 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
     (async () => {
       setLoading(true);
       try {
-        const { data: cData } = await supabase.from("clients").select("full_name").eq("id", clientId).single();
-        if (cData && mounted.current) setClientName(cData.full_name);
+        const { data: cData } = await supabase.from("clients").select("full_name, ssn, address").eq("id", clientId).single();
+        if (cData && mounted.current) {
+          setClientName(cData.full_name);
+          setClientSsn(cData.ssn || "");
+          setClientAddress(cData.address || "");
+        }
 
         let { data, error } = await supabase
           .from("client_documents")
-          .select("file_name, file_url, created_at, validation_status, validation_notes, expires_at, ai_confidence")
+          .select("file_name, file_url, created_at, validation_status, validation_notes, expires_at, ai_confidence, validation_details")
           .eq("client_id", clientId)
           .in("file_name", KEYS)
           .order("created_at", { ascending: false });
@@ -59,7 +79,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
         // select/update/insert needs a fallback until the migration is
         // confirmed run). Retry without the new columns so existing
         // uploads keep showing regardless of migration state.
-        if (error && /validation_status|validation_notes|expires_at|ai_confidence/i.test(error.message || "")) {
+        if (error && /validation_status|validation_notes|expires_at|ai_confidence|validation_details/i.test(error.message || "")) {
           console.warn("client_documents validation columns not found (run sql/add_document_validation.sql) — loading without validation state.");
           const fallback = await supabase
             .from("client_documents")
@@ -90,6 +110,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
                     reasoning: row.validation_notes,
                     expiresAt: row.expires_at,
                     confidence: row.ai_confidence,
+                    checks: row.validation_details || null,
                   }
                 : null;
           }
@@ -249,9 +270,9 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
     if (!clientId) return;
     setCheckingKeys((prev) => ({ ...prev, [key]: true }));
     try {
-      const result = await validateDocument({ docType: key, file, fileUrl, clientName });
+      const result = await validateDocument({ docType: key, file, fileUrl, clientName, clientAddress, clientSsn });
       if (!result.success) {
-        addToast({ title: "Validity Check Failed", message: result.reasoning || "Could not check this document right now.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
+        if (showAiResults) addToast({ title: "Validity Check Failed", message: result.reasoning || "Could not check this document right now.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
         return;
       }
 
@@ -272,6 +293,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
           validation_notes: result.reasoning || null,
           expires_at: result.expiresAt || null,
           ai_confidence: result.confidence,
+          validation_details: result.checks || null,
           validated_at: new Date().toISOString(),
         })
         .eq("client_id", clientId)
@@ -281,13 +303,13 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
       if (mounted.current) {
         setAssets((prev) => ({
           ...prev,
-          [key]: { ...prev[key], validation: { status: result.status, reasoning: result.reasoning, expiresAt: result.expiresAt, confidence: result.confidence } },
+          [key]: { ...prev[key], validation: { status: result.status, reasoning: result.reasoning, expiresAt: result.expiresAt, confidence: result.confidence, checks: result.checks || null } },
         }));
       }
 
       if (updErr) {
         console.error("Failed to save validation result:", updErr);
-        addToast({
+        if (showAiResults) addToast({
           title: "Check Ran, But Couldn't Save",
           message: `The AI checked this document, but the result couldn't be saved (${updErr.message}). It will show as "Not checked" again after reloading — confirm sql/add_document_validation.sql has been run.`,
           variant: "danger",
@@ -299,7 +321,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
 
       if (!updated || updated.length === 0) {
         console.error("Validation update matched 0 rows — likely blocked by a Row Level Security UPDATE policy on client_documents.");
-        addToast({
+        if (showAiResults) addToast({
           title: "Check Ran, But Couldn't Save",
           message: `The AI checked this document, but the save was silently blocked — no database error, but 0 rows were updated. This points to a missing UPDATE permission (Row Level Security policy) on client_documents, not a missing migration. It will show as "Not checked" again after reloading.`,
           variant: "danger",
@@ -310,7 +332,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
       }
 
       const badge = VALIDATION_BADGES[result.status];
-      addToast({
+      if (showAiResults) addToast({
         title: `${ASSET_LABELS[key] || key}: ${badge?.label || result.status}`,
         message: result.reasoning || "",
         variant: result.status === "valid" ? "success" : result.status === "needs_review" ? "info" : "warning",
@@ -401,6 +423,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
           onCopy={() => copyUrl(assets.license.signedUrl)}
           onCheckValidity={() => handleCheckValidity("license")}
           checking={!!checkingKeys.license}
+          showAiResults={showAiResults}
         />
 
         <div className="vr border-secondary opacity-25"></div>
@@ -414,6 +437,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
           onCopy={() => copyUrl(assets.ssn.signedUrl)}
           onCheckValidity={() => handleCheckValidity("ssn")}
           checking={!!checkingKeys.ssn}
+          showAiResults={showAiResults}
         />
 
         <div className="vr border-secondary opacity-25"></div>
@@ -427,13 +451,14 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey }) {
           onCopy={() => copyUrl(assets.poa.signedUrl)}
           onCheckValidity={() => handleCheckValidity("poa")}
           checking={!!checkingKeys.poa}
+          showAiResults={showAiResults}
         />
       </div>
     </div>
   );
 }
 
-function AssetRow({ label, record, placeholder, onUpload, onRemove, onCopy, onCheckValidity, checking }) {
+function AssetRow({ label, record, placeholder, onUpload, onRemove, onCopy, onCheckValidity, checking, showAiResults = true }) {
   const isImage = record.signedUrl && /\.(png|jpe?g|webp|gif)(\?|$)/i.test(record.signedUrl);
   const badge = record.validation ? VALIDATION_BADGES[record.validation.status] : null;
 
@@ -458,20 +483,22 @@ function AssetRow({ label, record, placeholder, onUpload, onRemove, onCopy, onCh
         {label}
       </div>
 
-      <div style={{ minHeight: "20px" }}>
-        {checking ? (
-          <span className="small text-muted"><span className="spinner-border spinner-border-sm me-1" style={{ width: "0.7rem", height: "0.7rem" }}></span>Checking…</span>
-        ) : badge ? (
-          <span
-            className={`small fw-semibold ${badge.className}`}
-            title={[record.validation.reasoning, record.validation.expiresAt ? `Date on file: ${record.validation.expiresAt}` : null].filter(Boolean).join(" — ")}
-          >
-            <i className={`bi ${badge.icon} me-1`}></i>{badge.label}
-          </span>
-        ) : record.path ? (
-          <span className="small text-muted opacity-75">Not checked</span>
-        ) : null}
-      </div>
+      {showAiResults && (
+        <div style={{ minHeight: "20px" }}>
+          {checking ? (
+            <span className="small text-muted"><span className="spinner-border spinner-border-sm me-1" style={{ width: "0.7rem", height: "0.7rem" }}></span>Checking…</span>
+          ) : badge ? (
+            <span
+              className={`small fw-semibold ${badge.className}`}
+              title={[record.validation.reasoning, record.validation.expiresAt ? `Date on file: ${record.validation.expiresAt}` : null].filter(Boolean).join(" — ")}
+            >
+              <i className={`bi ${badge.icon} me-1`}></i>{badge.label}
+            </span>
+          ) : record.path ? (
+            <span className="small text-muted opacity-75">Not checked</span>
+          ) : null}
+        </div>
+      )}
 
       <div
         className="shadow-sm"
@@ -540,14 +567,16 @@ function AssetRow({ label, record, placeholder, onUpload, onRemove, onCopy, onCh
           <i className="bi bi-trash"></i>
         </button>
 
-        <button
-          className="btn btn-sm btn-outline-secondary"
-          onClick={onCheckValidity}
-          disabled={!record.path || checking}
-          title="Check Validity (AI)"
-        >
-          {checking ? <span className="spinner-border spinner-border-sm"></span> : <i className="bi bi-shield-check"></i>}
-        </button>
+        {showAiResults && (
+          <button
+            className="btn btn-sm btn-outline-secondary"
+            onClick={onCheckValidity}
+            disabled={!record.path || checking}
+            title="Check Validity (AI)"
+          >
+            {checking ? <span className="spinner-border spinner-border-sm"></span> : <i className="bi bi-shield-check"></i>}
+          </button>
+        )}
       </div>
     </div>
   );

@@ -58,24 +58,31 @@ export async function resolveToImageDataUrl(blob) {
 // signed Storage URL) is the fallback for re-checking an already-
 // uploaded document where the original File object no longer exists.
 //
-// Pass either `docType` (legacy 'license'|'ssn'|'poa', CoverLetterAssets.jsx)
-// or `category` ('identity'|'address'|'authorization', CoverLetterAssetsLTOS.jsx)
-// — never both. `clientAddress` is only used (and only needed) for
-// category:'address' checks — see the Edge Function's addressNote.
+// Pass exactly one of `docType` (legacy 'license'|'ssn'|'poa',
+// CoverLetterAssets.jsx), `category` ('identity'|'address'|'authorization',
+// CoverLetterAssetsLTOS.jsx), or `reportCheck` ('ftc', the FTC Identity
+// Theft Report uploaded via LogChecklistItemModal.jsx) — never more than
+// one. `clientSsn`/`clientEmail`/`clientPhone` are only used by the doc
+// types that actually check them (ssn docType, and reportCheck:'ftc');
+// harmless to pass for others.
 //
 // On success: { success: true, status, confidence, expiresAt, issuedAt,
-// reasoning, detectedType }. issuedAt is only populated for identity
-// documents (license/state ID/passport) — the model also extracts it so
-// the Edge Function can cross-check it didn't mix up the issue date with
-// the expiration date (the two sit right next to each other on a license
-// and are easy to misread). detectedType is null for docType requests
-// (legacy system has no auto-detection concept) and one of the category's
-// allowed type keys (or "unknown") for category requests.
+// reasoning, detectedType, checks }. issuedAt is only populated for
+// identity documents (license/state ID/passport) — the model also
+// extracts it so the Edge Function can cross-check it didn't mix up the
+// issue date with the expiration date (the two sit right next to each
+// other on a license and are easy to misread). detectedType is null for
+// docType requests (legacy system has no auto-detection concept) and one
+// of the category's allowed type keys (or "unknown") for category
+// requests. `checks` (added for the Alignment Check feature) holds the
+// deterministic name/address/SSN/email/phone match results — shape
+// depends on request type, see the Edge Function's header comment; pass
+// it straight through to client_documents.validation_details as-is.
 // On any failure (network error, Edge Function error): { success: false,
 // reasoning } — callers should NOT persist a status in this case; leave
 // whatever validation_status is already on the row untouched rather than
 // overwriting a real prior result with an artifact of a failed retry.
-export async function validateDocument({ docType, category, file, fileUrl, clientName, clientAddress }) {
+export async function validateDocument({ docType, category, reportCheck, file, fileUrl, clientName, clientAddress, clientSsn, clientEmail, clientPhone }) {
   try {
     const blob = file || (fileUrl ? await (await fetch(fileUrl)).blob() : null);
     if (!blob) throw new Error("No file provided to validate.");
@@ -91,7 +98,7 @@ export async function validateDocument({ docType, category, file, fileUrl, clien
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ docType, category, imageDataUrl, clientName, clientAddress, today }),
+        body: JSON.stringify({ docType, category, reportCheck, imageDataUrl, clientName, clientAddress, clientSsn, clientEmail, clientPhone, today }),
       }
     );
     const result = await res.json();

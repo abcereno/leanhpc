@@ -65,13 +65,20 @@ export function useProgressReportData(clientId) {
           return await res.json();
         };
 
-        // 👇 Always grab the TWO MOST RECENT files! 👇
-        const previousFile = reportFiles[reportFiles.length - 2].name;
+        // Baseline = the EARLIEST snapshot ever taken for this client, not
+        // "one import ago" — a Progress Report should always measure from
+        // where the client started, the same way any real progress-tracking
+        // product does. Comparing the two most-recent files instead (the
+        // old behavior) meant "start" silently drifted forward every time a
+        // new report was imported, so after a few updates the report no
+        // longer showed progress since enrollment, just the delta since the
+        // last import — a materially different (and much smaller) number.
+        const baselineFile = reportFiles[0].name;
         const currentFile = reportFiles[reportFiles.length - 1].name;
 
-        console.log(`📊 Comparing ${previousFile} vs ${currentFile}`);
+        console.log(`📊 Comparing baseline ${baselineFile} vs current ${currentFile}`);
 
-        const startJson = await downloadJson(previousFile);
+        const startJson = await downloadJson(baselineFile);
         const currentJson = await downloadJson(currentFile);
 
         // --- 4. SET RAW SNAPSHOTS (Critical for Page 2) ---
@@ -134,7 +141,7 @@ export function useProgressReportData(clientId) {
         if (history.length === 0) {
              history = [
                 { 
-                    date: extractDateFromFilename(previousFile), 
+                    date: extractDateFromFilename(baselineFile), 
                     EX: getScoreValue(startJson.scores?.EX), 
                     TU: getScoreValue(startJson.scores?.TU), 
                     EQ: getScoreValue(startJson.scores?.EQ) 
@@ -151,7 +158,7 @@ export function useProgressReportData(clientId) {
         // --- 8. BUILD FINAL SUMMARY DATA (For Page 1) ---
         const processedData = {
             clientName: client?.full_name || 'Client',
-            startDate: extractDateFromFilename(previousFile), 
+            startDate: extractDateFromFilename(baselineFile), 
             currentDate: extractDateFromFilename(currentFile), 
             scores: {
                 start: { 
@@ -166,6 +173,12 @@ export function useProgressReportData(clientId) {
                 },
                 history: history
             },
+            // Full item-level lists (not just counts) — ProgressReportDetails
+            // (Page 2) used to call compareSnapshots() a second time itself
+            // to get these same deleted/remaining/added arrays from the raw
+            // snapshots. Computing it once here and handing the whole thing
+            // down means both pages read from a single source of truth.
+            comparisonDetails: comparison,
             results: {
                 EX: { deleted: comparison.EX.deleted.length, remaining: comparison.EX.remaining.length, added: comparison.EX.added.length },
                 TU: { deleted: comparison.TU.deleted.length, remaining: comparison.TU.remaining.length, added: comparison.TU.added.length },

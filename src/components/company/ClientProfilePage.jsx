@@ -273,7 +273,8 @@ export default function ClientProfilePage() {
             <Card.Header className="bg-white"><h5 className="mb-0 fw-bold">ID & Asset Tracking</h5></Card.Header>
             <Card.Body className="text-muted bg-light">
               <div className="mb-3 fw-bold">Photo ID + Proof of Address (30–60 days recent)</div>
-              <CoverLetterAssets clientId={clientId} onChange={(urls) => setDocLinks(urls)} />
+              {/* AI validation results are admin-only — see CoverLetterAssets.jsx's showAiResults doc comment. */}
+              <CoverLetterAssets clientId={clientId} onChange={(urls) => setDocLinks(urls)} showAiResults={false} />
               {docLinks && (docLinks.licenseUrl || docLinks.ssnUrl || docLinks.poaUrl) ? (
                 <div className="small mt-3 bg-white p-3 rounded border">
                   <div className="text-muted fw-bold mb-2">Signed Links (Valid 30 days):</div>

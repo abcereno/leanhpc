@@ -28,6 +28,7 @@ import EditClientModal from "./client-profile/EditClientModal";
 import InquiriesThread from "./client-profile/InquiriesThread";
 import RemindersSidebar from "./client-profile/RemindersSidebar/RemindersSidebar";
 import CoverLetterAssets from "./client-profile/CoverLetterAssets";
+import AlignmentCheckPanel from "./client-profile/AlignmentCheckPanel";
 import AdminCompanyTaskWidget from "./client-profile/AdminCompanyTaskWidget";
 import AdminClientInvoices from "./client-profile/AdminClientInvoices";
 import CreditAuditReport from "../shared/client-pages/CreditAuditReport";
@@ -244,6 +245,11 @@ export default function ClientProfile({ overrideId }) {
               <Row>
                 <Col className="px-0 ps-lg-2">
                   <CoverLetterAssets clientId={id} onChange={setLetterAssets} refreshKey={refreshKey} />
+                </Col>
+              </Row>
+              <Row>
+                <Col className="px-0 ps-lg-2">
+                  <AlignmentCheckPanel clientId={id} refreshKey={refreshKey} />
                 </Col>
               </Row>
               <Row className="mx-0 g-4">

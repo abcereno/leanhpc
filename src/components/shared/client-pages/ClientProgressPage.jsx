@@ -18,7 +18,7 @@ export default function ClientProgressPage() {
   const navigate = useNavigate();
   
   // Data Fetching
-  const { data, startSnapshot, currentSnapshot, loading, error } = useProgressReportData(clientId);
+  const { data, loading, error } = useProgressReportData(clientId);
   
   const [busy, setBusy] = useState(false);
   const [openPreview, setOpenPreview] = useState(false);
@@ -151,7 +151,7 @@ export default function ClientProgressPage() {
             <ProgressReportLayout data={data} />
         </div>
         <div className="report-page" style={{ height: 'auto', minHeight: '1123px' }}> 
-            <ProgressReportDetails startReport={startSnapshot} currentReport={currentSnapshot} />
+            <ProgressReportDetails comparison={data?.comparisonDetails} startDate={data?.startDate} currentDate={data?.currentDate} />
         </div>
       </div>
 
@@ -168,7 +168,7 @@ export default function ClientProgressPage() {
                     <ProgressReportLayout data={data} />
                 </div>
                 <div className="print-page">
-                    <ProgressReportDetails startReport={startSnapshot} currentReport={currentSnapshot} />
+                    <ProgressReportDetails comparison={data?.comparisonDetails} startDate={data?.startDate} currentDate={data?.currentDate} />
                 </div>
             </div>
         )}

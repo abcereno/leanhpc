@@ -37,12 +37,22 @@ const emptyAssets = () => ({
   authorization: { path: null, signedUrl: null, validation: null, docType: null },
 });
 
+// `showAiResults` (default false — every current caller of this component
+// is partner- or public-intake-facing: AddClientModal.jsx, AddClientForm.jsx)
+// gates the AI badge/toast/manual check button, same pattern as
+// CoverLetterAssets.jsx. Product decision: admins review AI results
+// themselves and follow up directly rather than surfacing raw AI output
+// to partners or intake users. The check still runs automatically after
+// upload either way — only the rendering and result-revealing toast are
+// gated. Pass showAiResults={true} explicitly if an admin-facing surface
+// for this component is ever added.
 export default function CoverLetterAssetsLTOS({
   clientId,
   onChange,
   companyName,
   clientName,
   clientAddress,
+  showAiResults = false,
 }) {
   const { addToast } = useToast();
   const shouldRender = useMemo(() => {
@@ -66,7 +76,7 @@ export default function CoverLetterAssetsLTOS({
       try {
         let { data, error } = await supabase
           .from("client_documents")
-          .select("file_name, file_url, validation_status, validation_notes, expires_at, ai_confidence, doc_type")
+          .select("file_name, file_url, validation_status, validation_notes, expires_at, ai_confidence, doc_type, validation_details")
           .eq("client_id", clientId)
           .in("file_name", KEYS);
 
@@ -74,7 +84,7 @@ export default function CoverLetterAssetsLTOS({
         // environment yet — same missing-column fallback pattern used by
         // CoverLetterAssets.jsx, so an unapplied migration never makes
         // already-uploaded documents look like they vanished.
-        if (error && /validation_status|validation_notes|expires_at|ai_confidence|doc_type/i.test(error.message || "")) {
+        if (error && /validation_status|validation_notes|expires_at|ai_confidence|doc_type|validation_details/i.test(error.message || "")) {
           console.warn("client_documents validation columns not found (run sql/add_document_validation.sql) — loading without validation state.");
           const fallback = await supabase
             .from("client_documents")
@@ -100,6 +110,7 @@ export default function CoverLetterAssetsLTOS({
                   reasoning: row.validation_notes,
                   expiresAt: row.expires_at,
                   confidence: row.ai_confidence,
+                  checks: row.validation_details || null,
                 }
               : null;
         }
@@ -209,7 +220,7 @@ export default function CoverLetterAssetsLTOS({
     try {
       const result = await validateDocument({ category: key, file, fileUrl, clientName, clientAddress });
       if (!result.success) {
-        addToast({ title: "Validity Check Failed", message: result.reasoning || "Could not check this document right now.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
+        if (showAiResults) addToast({ title: "Validity Check Failed", message: result.reasoning || "Could not check this document right now.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
         return;
       }
 
@@ -222,6 +233,7 @@ export default function CoverLetterAssetsLTOS({
           validation_notes: result.reasoning || null,
           expires_at: result.expiresAt || null,
           ai_confidence: result.confidence,
+          validation_details: result.checks || null,
           validated_at: new Date().toISOString(),
           doc_type: result.detectedType || null,
         })
@@ -235,14 +247,14 @@ export default function CoverLetterAssetsLTOS({
           [key]: {
             ...prev[key],
             docType: result.detectedType || null,
-            validation: { status: result.status, reasoning: result.reasoning, expiresAt: result.expiresAt, confidence: result.confidence },
+            validation: { status: result.status, reasoning: result.reasoning, expiresAt: result.expiresAt, confidence: result.confidence, checks: result.checks || null },
           },
         }));
       }
 
       if (updErr) {
         console.error("Failed to save validation result:", updErr);
-        addToast({
+        if (showAiResults) addToast({
           title: "Check Ran, But Couldn't Save",
           message: `The AI checked this document, but the result couldn't be saved (${updErr.message}). It will show as "Not checked" again after reloading — confirm sql/add_document_validation.sql has been run.`,
           variant: "danger",
@@ -254,7 +266,7 @@ export default function CoverLetterAssetsLTOS({
 
       if (!updated || updated.length === 0) {
         console.error("Validation update matched 0 rows — likely blocked by a Row Level Security UPDATE policy on client_documents.");
-        addToast({
+        if (showAiResults) addToast({
           title: "Check Ran, But Couldn't Save",
           message: `The AI checked this document, but the save was silently blocked — no database error, but 0 rows were updated. This points to a missing UPDATE permission (Row Level Security policy) on client_documents, not a missing migration. It will show as "Not checked" again after reloading.`,
           variant: "danger",
@@ -266,7 +278,7 @@ export default function CoverLetterAssetsLTOS({
 
       const badge = VALIDATION_BADGES[result.status];
       const typeLabel = result.detectedType ? LTOS_TYPE_LABELS[result.detectedType] || result.detectedType : null;
-      addToast({
+      if (showAiResults) addToast({
         title: `${LTOS_LABELS[key]}${typeLabel ? ` (${typeLabel})` : ""}: ${badge?.label || result.status}`,
         message: result.reasoning || "",
         variant: result.status === "valid" ? "success" : result.status === "needs_review" ? "info" : "warning",
@@ -330,6 +342,7 @@ export default function CoverLetterAssetsLTOS({
                 onUpload={(f) => handleUpload(k, f)}
                 onRemove={() => handleRemove(k)}
                 onCheckValidity={() => handleCheckValidity(k)}
+                showAiResults={showAiResults}
               />
             </div>
           ))}
@@ -339,7 +352,7 @@ export default function CoverLetterAssetsLTOS({
   );
 }
 
-function AssetTile({ label, required, record, checking, placeholder, onUpload, onRemove, onCheckValidity }) {
+function AssetTile({ label, required, record, checking, placeholder, onUpload, onRemove, onCheckValidity, showAiResults = true }) {
   const isImage = record.signedUrl && /\.(png|jpe?g|webp|gif)/i.test(record.signedUrl);
   const badge = record.validation ? VALIDATION_BADGES[record.validation.status] : null;
   const typeLabel = record.docType ? LTOS_TYPE_LABELS[record.docType] || record.docType : null;
@@ -361,20 +374,22 @@ function AssetTile({ label, required, record, checking, placeholder, onUpload, o
         {label}{required ? <span className="text-danger"> *</span> : <span className="text-muted fw-normal"> (when applicable)</span>}
       </div>
 
-      <div className="mb-2" style={{ minHeight: "16px" }}>
-        {checking ? (
-          <span className="extra-small text-muted"><span className="spinner-border spinner-border-sm me-1" style={{ width: "0.65rem", height: "0.65rem" }}></span>Checking…</span>
-        ) : badge ? (
-          <span
-            className={`extra-small fw-semibold ${badge.className}`}
-            title={[record.validation.reasoning, record.validation.expiresAt ? `Date on file: ${record.validation.expiresAt}` : null].filter(Boolean).join(" — ")}
-          >
-            <i className={`bi ${badge.icon} me-1`}></i>{badge.label}{typeLabel ? ` · ${typeLabel}` : ""}
-          </span>
-        ) : record.path ? (
-          <span className="extra-small text-muted opacity-75">Not checked</span>
-        ) : null}
-      </div>
+      {showAiResults && (
+        <div className="mb-2" style={{ minHeight: "16px" }}>
+          {checking ? (
+            <span className="extra-small text-muted"><span className="spinner-border spinner-border-sm me-1" style={{ width: "0.65rem", height: "0.65rem" }}></span>Checking…</span>
+          ) : badge ? (
+            <span
+              className={`extra-small fw-semibold ${badge.className}`}
+              title={[record.validation.reasoning, record.validation.expiresAt ? `Date on file: ${record.validation.expiresAt}` : null].filter(Boolean).join(" — ")}
+            >
+              <i className={`bi ${badge.icon} me-1`}></i>{badge.label}{typeLabel ? ` · ${typeLabel}` : ""}
+            </span>
+          ) : record.path ? (
+            <span className="extra-small text-muted opacity-75">Not checked</span>
+          ) : null}
+        </div>
+      )}
 
       <div className="mb-2 bg-white border d-flex align-items-center justify-content-center" style={{ height: 100, borderRadius: 6, overflow: "hidden" }}>
         {isDragActive ? (
@@ -392,7 +407,7 @@ function AssetTile({ label, required, record, checking, placeholder, onUpload, o
         <label className="btn btn-sm btn-primary flex-fill mb-0">
           Upload <input type="file" hidden onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
         </label>
-        {record.path && (
+        {record.path && showAiResults && (
           <button className="btn btn-sm btn-outline-secondary" onClick={onCheckValidity} disabled={checking} title="Check Validity (AI)">
             {checking ? <span className="spinner-border spinner-border-sm"></span> : <i className="bi bi-shield-check"></i>}
           </button>

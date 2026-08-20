@@ -1,18 +1,14 @@
 import React from "react";
-import { compareSnapshots } from "../../../utils/creditAnalysis"; 
 
-export default function ProgressReportDetails({ startReport, currentReport }) {
-  React.useEffect(() => {
-    console.group("🔍 ProgressReportDetails Debug");
-    console.debug("startReport:", startReport);
-    console.debug("currentReport:", currentReport);
-    console.groupEnd();
-  }, [startReport, currentReport]);
+// Takes the already-computed comparison (see useProgressReportData.js's
+// comparisonDetails) instead of raw snapshots + its own compareSnapshots()
+// call — this used to redo the exact same comparison the hook already ran,
+// on the same two files, every render.
+export default function ProgressReportDetails({ comparison, startDate, currentDate }) {
+  if (!comparison) return null;
 
-  if (!startReport || !currentReport) return null;
+  const data = comparison;
 
-  const data = compareSnapshots(startReport, currentReport);
-  
   const bureaus = [
     { code: "TU", name: "TransUnion", color: "#00aaff" },
     { code: "EX", name: "Experian", color: "#ff4444" },
@@ -27,7 +23,7 @@ export default function ProgressReportDetails({ startReport, currentReport }) {
           Bureau Breakdown
         </h2>
         <p style={{ margin: 0, color: "#666", fontSize: "14px" }}>
-          Detailed comparison: {startReport.report_date} vs {currentReport.report_date}
+          Detailed comparison: {startDate} vs {currentDate}
         </p>
       </div>
 

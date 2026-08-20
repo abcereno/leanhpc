@@ -15,7 +15,8 @@ export default function ProfileStep2({ clientId, onNext, onBack }) {
                   
                   {/* Wrapper for horizontal scroll on small screens */}
                   <div style={{ overflowX: 'auto', paddingBottom: '10px' }}>
-                     <CoverLetterAssets clientId={clientId} onChange={setLinks} />
+                     {/* AI validation results are admin-only — see CoverLetterAssets.jsx's showAiResults doc comment. */}
+                     <CoverLetterAssets clientId={clientId} onChange={setLinks} showAiResults={false} />
                   </div>
                   {/* Drop the Consumer Component Here! */}
                   <div className="mb-4">

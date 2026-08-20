@@ -78,6 +78,19 @@ export async function saveUpdateAudit(clientId, rawJson, auditReport) {
     const rawPath = `${clientId}/reports/raw/${timestamp}_smartcredit_raw.json`;
     await supabase.storage.from(BUCKET).upload(rawPath, JSON.stringify(rawJson));
 
+    // 1b. Refresh the CANONICAL raw report (fixed path, always the latest
+    // pull) — this used to only get written once, by saveInitialAudit, on
+    // the very first import. Every subsequent "Update Report" refreshed
+    // client_audit_report.json and the daily snapshot below but left this
+    // file frozen at day one, so anything reading raw_credit_report.json
+    // directly (useReportData.js / the Credit Report display) silently
+    // showed stale data forever after the first update. This is now the
+    // single source of truth every update keeps current — see
+    // saveInitialAudit below, which no longer needs its own copy of this
+    // write.
+    const rawReportPath = `${clientId}/raw_credit_report.json`;
+    await supabase.storage.from(BUCKET).upload(rawReportPath, JSON.stringify(rawJson), { upsert: true });
+
     // 2. Update Active Report (What the dashboard sees)
     const auditPath = `${clientId}/client_audit_report.json`;
     await supabase.storage.from(BUCKET).upload(auditPath, JSON.stringify(auditReport), { upsert: true });
@@ -109,11 +122,11 @@ export async function saveUpdateAudit(clientId, rawJson, auditReport) {
 }
 
 // --- 2. THE "INITIAL IMPORT" FUNCTION ---
+// saveUpdateAudit now writes raw_credit_report.json itself (see 1b above),
+// so this is just a named entry point for "first import" callers — kept
+// separate from saveUpdateAudit rather than merged so call sites stay
+// self-documenting about which case they're in.
 export async function saveInitialAudit(clientId, rawJson, auditReport) {
-    await supabase.storage
-        .from(BUCKET)
-        .upload(`${clientId}/raw_credit_report.json`, JSON.stringify(rawJson), { upsert: true });
-
     return saveUpdateAudit(clientId, rawJson, auditReport);
 }
 

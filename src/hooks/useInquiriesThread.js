@@ -35,13 +35,19 @@ const isIgnoredStatus = isNonDisputableClassification;
 // supervisor approval flow.
 const DISPUTABLE = DISPUTE_PENDING_CLASSIFICATIONS;
 
-export default function useInquiriesThread({ 
-  clientId, 
-  userId: propUserId, 
-  adminName: propAdminName, 
-  clientName: propClientName, 
-  letterAssets, 
-  initialData = null 
+export default function useInquiriesThread({
+  clientId,
+  userId: propUserId,
+  adminName: propAdminName,
+  clientName: propClientName,
+  letterAssets,
+  initialData = null,
+  // InquiriesThread.jsx already passed this in, but it was never
+  // destructured here — bumping refreshKey after a report import/update
+  // (see ClientHeader.jsx's handleModalSave -> onRefresh) had no effect on
+  // this hook at all, so the thread only ever showed fresh data after a
+  // full page reload. Now part of the fetch effect's deps below.
+  refreshKey,
 }) {
   const id = clientId;
 
@@ -186,7 +192,7 @@ export default function useInquiriesThread({
         return; 
     }
     fetchInquiriesThread();
-  }, [initialData, fetchInquiriesThread, updateCounts_]);
+  }, [initialData, fetchInquiriesThread, updateCounts_, refreshKey]);
 
   // Loads the current approved-to-dispute numbers for the "Approved to
   // Dispute" info panel (InquiriesThread.jsx). Best-effort — a missing

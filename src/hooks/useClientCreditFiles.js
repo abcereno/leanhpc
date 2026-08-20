@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { runAuditEngine } from "../utils/auditEngine";
+import { buildThreadFromAudit } from "../utils/buildThreadFromAudit";
 
 export function useClientCreditFiles(clientId, refreshKey = 0, selectedFile = null) {
   const [analysisParsed, setAnalysisParsed] = useState(null);
@@ -152,20 +153,10 @@ export function useClientCreditFiles(clientId, refreshKey = 0, selectedFile = nu
       }
 
       if (!threadJson && calculatedAudit) {
-          const polyThread = { accounts: [], experian: [], transunion: [], equifax: [] };
-
-          polyThread.accounts = calculatedAudit.accounts.map(acc => ({
-              creditor: acc.name, type: acc.type, dateOpened: acc.opened, openClosed: acc.status 
-          }));
-
-          // Because we sanitized inquiries above, this .forEach is now 100% safe!
-          calculatedAudit.inquiries.forEach(inq => {
-              const item = { date: inq.date, creditor: inq.creditor };
-              if (inq.bureau === 'EX') polyThread.experian.push(item);
-              if (inq.bureau === 'TU') polyThread.transunion.push(item);
-              if (inq.bureau === 'EQ') polyThread.equifax.push(item);
-          });
-          setThread(polyThread);
+          // Shared with Fetch3bModal.jsx / reportAutoImport.js (see
+          // utils/buildThreadFromAudit.js) — this used to be a local copy
+          // of the same derivation.
+          setThread(buildThreadFromAudit(calculatedAudit));
       }
 
       setLoading(false);

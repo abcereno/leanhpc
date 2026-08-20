@@ -6,6 +6,8 @@ import { useToast } from "../../../shared/ui/ToastNotifier";
 import { handleImagePaste } from "../../../../utils/pasteImageUpload";
 import FormatWithImages from "../../../shared/ui/FormatWithImages";
 
+const BUCKET = "clients";
+
 // Generic "check this box, log why" modal — reused by DocumentRouting.jsx
 // for FTC / CFPB / Postalocity / Certified Postalocity. Each of those is a
 // boolean prep-step column on document_routing (ftc_completed,
@@ -19,10 +21,21 @@ import FormatWithImages from "../../../shared/ui/FormatWithImages";
 // separate log table, per the client's explicit ask — one place ("the
 // comments section") admins/partners already check for a client's history,
 // instead of scattering per-checkbox logs across yet another table.
-export default function LogChecklistItemModal({ show, onClose, clientId, label, roundCount, onLogged }) {
-  const { adminName } = useAuth();
+//
+// `requireUpload` (DocumentRouting.jsx sets this for the FTC checkbox
+// specifically) additionally requires a real file — previously the only
+// way to attach evidence here was pasting a screenshot into the note,
+// which was optional and just sat as a markdown-ish link inside a comment,
+// nothing structured or queryable. With requireUpload, the file becomes a
+// real client_documents row (doc_type: 'ftc_report'), the same storage
+// pattern LetterEditorModal.jsx already uses for generated letters, so
+// it's an actual document the AI alignment check (validate-document) can
+// open and read — not just a note a human has to scroll to find.
+export default function LogChecklistItemModal({ show, onClose, clientId, label, roundCount, onLogged, requireUpload = false }) {
+  const { adminName, userId } = useAuth();
   const { addToast } = useToast();
   const [note, setNote] = useState("");
+  const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Same "append the uploaded screenshot's URL on a new line, don't wipe
@@ -40,9 +53,41 @@ export default function LogChecklistItemModal({ show, onClose, clientId, label, 
   };
 
   const handleSubmit = async () => {
+    if (requireUpload && !file) {
+      addToast({ title: "Report Required", message: `Attach a photo or PDF of the ${label} before checking this box.`, variant: "warning", icon: "bi-exclamation-triangle-fill" });
+      return;
+    }
+
     setSubmitting(true);
     const cleanNote = note.trim();
-    const text = `✅ ${label}${roundCount ? ` — Round ${roundCount}` : ""} marked complete.${cleanNote ? ` ${cleanNote}` : ""}`;
+
+    // Upload first (if required) so a storage failure never leaves a
+    // "marked complete" comment with nothing actually attached.
+    if (requireUpload && file) {
+      try {
+        const ext = (file.name.split(".").pop() || "dat").toLowerCase();
+        const storagePath = `${clientId}/ftc_reports/round-${roundCount || 0}-${Date.now()}.${ext}`;
+
+        const { error: uploadErr } = await supabase.storage.from(BUCKET).upload(storagePath, file, { contentType: file.type || undefined });
+        if (uploadErr) throw uploadErr;
+
+        const { error: insertErr } = await supabase.from("client_documents").insert({
+          client_id: clientId,
+          file_name: `Round ${roundCount || "?"} - FTC Report`,
+          file_url: storagePath,
+          doc_type: "ftc_report",
+          validation_status: "pending",
+          uploaded_by: userId,
+        });
+        if (insertErr) throw insertErr;
+      } catch (err) {
+        setSubmitting(false);
+        addToast({ title: "Upload Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+        return;
+      }
+    }
+
+    const text = `✅ ${label}${roundCount ? ` — Round ${roundCount}` : ""} marked complete.${requireUpload ? " Report attached." : ""}${cleanNote ? ` ${cleanNote}` : ""}`;
 
     const { error } = await supabase.from("comments").insert([
       {
@@ -70,6 +115,7 @@ export default function LogChecklistItemModal({ show, onClose, clientId, label, 
     }
 
     setNote("");
+    setFile(null);
     onClose();
   };
 
@@ -82,6 +128,17 @@ export default function LogChecklistItemModal({ show, onClose, clientId, label, 
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
+        {requireUpload && (
+          <Form.Group className="mb-3">
+            <Form.Label className="fw-semibold">Report File *</Form.Label>
+            <Form.Control
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+            <div className="form-text">A photo or PDF of the actual FTC report — required to check this box.</div>
+          </Form.Group>
+        )}
         <Form.Group>
           <Form.Label>Notes (optional)</Form.Label>
           <Form.Control
@@ -105,7 +162,7 @@ export default function LogChecklistItemModal({ show, onClose, clientId, label, 
         <Button variant="secondary" onClick={onClose} disabled={submitting}>
           Cancel
         </Button>
-        <Button variant="primary" onClick={handleSubmit} disabled={submitting}>
+        <Button variant="primary" onClick={handleSubmit} disabled={submitting || (requireUpload && !file)}>
           {submitting ? "Saving..." : "Log & Check"}
         </Button>
       </Modal.Footer>

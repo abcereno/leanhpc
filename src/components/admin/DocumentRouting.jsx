@@ -844,7 +844,7 @@ export default function DocumentRouting() {
                       onChange={() =>
                         task.ftc_completed
                           ? toggleCheck(task, 'ftc_completed')
-                          : setLogChecklistFor({ task, field: 'ftc_completed', label: 'FTC Complaint' })
+                          : setLogChecklistFor({ task, field: 'ftc_completed', label: 'FTC Complaint', requireUpload: true })
                       }
                     />
                   </td>
@@ -1017,6 +1017,7 @@ export default function DocumentRouting() {
           clientId={logChecklistFor.task.client_id}
           label={logChecklistFor.label}
           roundCount={logChecklistFor.task.round_count}
+          requireUpload={!!logChecklistFor.requireUpload}
           onLogged={() => toggleCheck(logChecklistFor.task, logChecklistFor.field)}
         />
       )}
