@@ -58,7 +58,6 @@ export const AuthProvider = ({ children }) => {
   // reload.
 
   const clearAppState = () => {
-    console.log("🧹 [AuthContext] Clearing app state.");
     setUser(null);
     setRole(null);
     setPermissions({});
@@ -69,19 +68,14 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     let isMounted = true;
-    console.log("🚀 [AuthContext] Provider Mounted. Starting session check...");
 
-    const handleSession = async (session, source = "Unknown") => {
-      console.log(`🔍 [AuthContext] handleSession triggered by [${source}].`);
+    const handleSession = async (session) => {
       const incomingUser = session?.user ?? null;
-      
+
       if (!incomingUser) {
-        console.log("🛑 [AuthContext] No incoming user found in session. Clearing state.");
         if (isMounted) clearAppState();
         return;
       }
-
-      console.log(`👤 [AuthContext] User detected: ${incomingUser.email} (ID: ${incomingUser.id})`);
 
       if (isMounted) {
         // Supabase hands us a brand-new `session.user` object on EVERY auth
@@ -107,12 +101,10 @@ export const AuthProvider = ({ children }) => {
 
       // Check if we already fetched data for this exact user
       if (incomingUser.id === completedFetchForUserId.current) {
-        console.log("⏭️ [AuthContext] Profile already fetched for this user. Skipping database call.");
         if (isMounted) setLoading(false);
         return;
       }
 
-      console.log("⏳ [AuthContext] Setting loading to TRUE. Fetching profile from database...");
       if (isMounted) setLoading(true);
 
       try {
@@ -145,12 +137,10 @@ export const AuthProvider = ({ children }) => {
 
         if (data) {
           const normalized = normalizeRole(data.role);
-          console.log(`✅ [AuthContext] Profile found! Role: [${normalized}], Name: [${data.full_name}]`);
           setRole(normalized);
           setPermissions(data.permissions || {});
           setProfileData(data);
         } else {
-          console.log("⚠️ [AuthContext] No profile found in 'profiles' table. (Likely a Company or Affiliate user).");
           setRole(null);
           setPermissions({});
           setProfileData(null);
@@ -163,33 +153,26 @@ export const AuthProvider = ({ children }) => {
         console.error("❌ [AuthContext] Critical failure during profile fetch:", err);
       } finally {
         if (isMounted) {
-          console.log("🔓 [AuthContext] Fetch sequence complete. Releasing loading lock (loading = false).");
           setLoading(false);
         }
       }
     };
 
     // 1. Initial session check on mount
-    console.log("📡 [AuthContext] Requesting initial session from Supabase...");
     supabase.auth.getSession().then(({ data: { session } }) => {
-      handleSession(session, "Initial Mount getSession");
+      handleSession(session);
     });
 
     // 2. Listen for auth changes (Login, Logout, Token Refresh)
-    console.log("👂 [AuthContext] Subscribing to onAuthStateChange events...");
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log(`🔔 [AuthContext] Auth Event Fired: === ${event} ===`);
-      
       if (event === 'SIGNED_OUT') {
-        console.log("🚪 [AuthContext] SIGNED_OUT event detected.");
         if (isMounted) clearAppState();
       } else {
-        handleSession(session, `Auth Event: ${event}`);
+        handleSession(session);
       }
     });
 
     return () => {
-      console.log("🛑 [AuthContext] Provider Unmounting. Cleaning up subscriptions.");
       isMounted = false;
       subscription?.unsubscribe();
     };
@@ -232,11 +215,9 @@ export const AuthProvider = ({ children }) => {
       isDeveloper: roleNorm === "developer",
 
       signOut: async () => {
-        console.log("🚨 [AuthContext] Manual Sign Out requested.");
         setLoading(true);
         try {
           await supabase.auth.signOut();
-          console.log("🗑️ [AuthContext] Clearing local storage keys.");
           Object.keys(localStorage).forEach(key => {
             if (key.startsWith('sb')) localStorage.removeItem(key);
           });

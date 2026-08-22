@@ -54,7 +54,7 @@ export default function ProgressReportDetails({ comparison, startDate, currentDa
                     {bureauData.deleted.map((item, i) => (
                       <li key={i} style={{ marginBottom: "5px" }}>
                         <strong style={{ color: "#333" }}>
-                          {item.account} {item.account_num ? `(#${item.account_num})` : ''}
+                          {item.account} {(item.accountNumberLast4 || item.account_num) ? `(#${item.accountNumberLast4 || item.account_num})` : ''}
                         </strong>
                         <div style={{ fontSize: "9px", color: "#666" }}>{item.issue}</div>
                       </li>

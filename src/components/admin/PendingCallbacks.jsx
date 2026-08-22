@@ -66,7 +66,6 @@ const DOC_ISSUES = [
         ),
         document_logs(employee:admin_id(full_name),callback_date, submitted_at)
       `);
-console.log("Fetched clients:", data); // Debugging line
 
       if (error) {
         console.error("Error fetching clients:", error);

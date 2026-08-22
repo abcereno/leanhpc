@@ -110,8 +110,7 @@ export default function InquiriesThread({
 
   // Wrapper function to handle Save + Log Action + Open Modal
   const handleSaveAndTrain = async () => {
-    const success = await saveUpdatedThread(); 
-    console.log("Save result:", success); // Debug log
+    const success = await saveUpdatedThread();
     if (success) {
       
       // LOG THE ACTION IN THE BACKGROUND

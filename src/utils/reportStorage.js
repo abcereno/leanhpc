@@ -38,8 +38,6 @@ export async function saveUpdateAudit(clientId, rawJson, auditReport) {
             const detectedEvents = detectProfileChanges(oldAuditData, auditReport);
             
             if (detectedEvents.length > 0) {
-                console.log(`🔍 Delta Engine found ${detectedEvents.length} changes!`);
-                
                 // 1. SAVE TO DATABASE FOR CLIENT PORTAL
                 const notificationsToInsert = detectedEvents.map(event => ({
                     client_id: clientId,

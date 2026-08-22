@@ -22,7 +22,6 @@ export default function AdminNotificationWatcher() {
 
     // 1. Create a unique channel name so React rendering doesn't cause collisions
     const channelName = `admin-notifs-${user.id}-${Date.now()}`;
-    console.log(`📡 Subscribing to ${channelName}...`);
 
     // 2. Combine all listeners onto a single, uniquely named channel
     const notifChannel = supabase.channel(channelName)
@@ -153,13 +152,10 @@ export default function AdminNotificationWatcher() {
       )
       
       // --- EXECUTE THE SUBSCRIPTION ---
-      .subscribe((status) => {
-        console.log(`🔌 Channel Status:`, status);
-      });
+      .subscribe();
 
     return () => {
       // Clean up the channel perfectly when you leave the page
-      console.log(`🧹 Cleaning up channel: ${channelName}`);
       supabase.removeChannel(notifChannel);
     };
   }, [user, canReceiveNotifications, addToast, location.pathname]); // 👈 Added location.pathname to dependencies

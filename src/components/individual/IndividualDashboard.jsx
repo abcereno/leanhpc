@@ -61,8 +61,6 @@ export default function IndividualDashboard() {
         let targetClient = candidates[0] || null;
 
         if (targetClient && !targetClient.auth_user_id) {
-            console.log("Found unlinked client profile (latest round)! Linking now...");
-
             const { data: linkedClient, error: linkError } = await supabase
                 .from("clients")
                 .update({ auth_user_id: authUser.id })
@@ -76,8 +74,6 @@ export default function IndividualDashboard() {
 
         // 4. CREATE NEW: If STILL no profile exists, create one from scratch
         if (!targetClient) {
-            console.log("No client profile found at all. Creating new one...");
-            
             const newClientPayload = {
                 full_name: authUser.user_metadata?.full_name || authUser.email,
                 email: authUser.email,

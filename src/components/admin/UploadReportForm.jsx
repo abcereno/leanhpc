@@ -71,11 +71,7 @@ export default function UploadReportForm() {
 
           const {
             data: { text },
-          } = await Tesseract.recognize(imageDataUrl, "eng", {
-            logger: (m) => {
-              console.log(`[🧠 OCR Page ${i}]`, m);
-            },
-          });
+          } = await Tesseract.recognize(imageDataUrl, "eng");
           fullText += `\n\n--- PAGE ${i} ---\n\n` + text;
         } catch (err) {
           console.error(`❌ OCR failed on page ${i}:`, err);
@@ -145,7 +141,6 @@ const classifiedInquiries = {
     });
 
     const accountJson = await accountRes.json();
-    console.log(`🧾 [Chunk ${i + 1}] account-parser result:`, accountJson);
 
     if (!accountJson.success) {
       setMessage(`❌ Account parse error in chunk ${i + 1}: ${accountJson.error}`);
@@ -176,7 +171,6 @@ const classifiedInquiries = {
     });
 
     const inquiryJson = await inquiryRes.json();
-    console.log(`🔍 [Chunk ${i + 1}] inquiry-parser result:`, inquiryJson);
 
     if (!inquiryJson.success) {
       setMessage(`❌ Inquiry parse error in chunk ${i + 1}: ${inquiryJson.error}`);
@@ -188,9 +182,6 @@ const classifiedInquiries = {
     classifiedInquiries.transunion.push(...(inquiryJson.transunion || []));
     classifiedInquiries.equifax.push(...(inquiryJson.equifax || []));
   }
-
-  console.log("✅ All Accounts Collected:", allAccounts);
-  console.log("✅ All Inquiries Collected:", classifiedInquiries);
 
   // STEP 3: Classify inquiries
   // Fetched once for the whole upload rather than per chunk — the lender
@@ -211,7 +202,6 @@ const classifiedInquiries = {
     });
 
     const classifyJson = await classifyRes.json();
-    console.log(`🧠 [Chunk ${i + 1}] classify-inquiries result:`, classifyJson);
 
     if (!classifyJson.success) {
       setMessage(`❌ Classification failed in chunk ${i + 1}: ${classifyJson.error}`);

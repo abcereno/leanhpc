@@ -182,7 +182,6 @@ export default function Fetch3BModal({
         );
         let rawData = null;
         try {
-          console.log("Attempting to fetch raw report...");
           const rawRes = await fetch(
             `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch_3b_raw`,
             {
@@ -415,7 +414,7 @@ export default function Fetch3BModal({
             ? "Updated 3B report data via SmartCredit."
             : "Performed initial 3B report import and initialized client.",
         });
-      } catch (logErr) {
+      } catch {
         console.warn("Skipping analytics log (User is likely a partner).");
       }
 

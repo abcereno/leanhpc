@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, matchPath } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import { Button, Badge, Card, ListGroup, Spinner } from "react-bootstrap";
@@ -49,32 +49,15 @@ export default function ClientSubmissionListener() {
   const { user, loadingAuth } = useAuth();
   const logAction = useLogger();
   const navigate = useNavigate();
-  const location = useLocation();
 
   // --- VISIBILITY LOGIC ---
-  const hiddenRoutes = [
-      "/company-portal",
-      "/affiliate-portal",
-      "/my-dashboard",
-      "/login",
-      "/approve-signups",
-      "/receipt",
-      "/terms-and-conditions",
-      "/privacy-policy",
-      "/reset-password",
-      "/update-password",
-      "/under-review",
-      "/company/:companyId/add-clients" ,
-      "/lead-funnel",
-      "/partner-eligibility",
-      "/intake-form",
-  ];
-
-  const isHiddenRoute = hiddenRoutes.some(route =>
-    matchPath({ path: route, end: false }, location.pathname)
-  );
-
-  const canViewQueue = !!user && !isHiddenRoute;
+  // Used to be a hand-maintained blocklist of public/portal route prefixes
+  // this widget shouldn't appear on — every new public page had to remember
+  // to add itself or it leaked the intake queue. Now mounted once inside
+  // AdminLayout.jsx instead of globally (see App.jsx), so reaching this
+  // component at all already means we're inside the admin route tree; the
+  // only real check left is whether an admin is actually logged in.
+  const canViewQueue = !!user;
 
   const [queue, setQueue] = useState([]);
   const [loadingQueue, setLoadingQueue] = useState(false);

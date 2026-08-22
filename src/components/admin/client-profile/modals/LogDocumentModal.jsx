@@ -46,7 +46,6 @@ export default function LogDocumentModal({ show, onClose, clientId, initialBurea
 
     // Try normal fetch (JSON)
     try {
-      console.log("[HL] sending via fetch →", HL_WEBHOOK_URL, payload);
       const controller = new AbortController();
       const id = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
@@ -60,7 +59,6 @@ export default function LogDocumentModal({ show, onClose, clientId, initialBurea
       clearTimeout(id);
 
       if (res.ok) {
-        console.log("[HL] fetch OK", res.status);
         return true;
       } else {
         const text = await res.text().catch(() => "");
@@ -76,7 +74,6 @@ export default function LogDocumentModal({ show, onClose, clientId, initialBurea
         type: "text/plain",
       });
       const ok = navigator.sendBeacon?.(HL_WEBHOOK_URL, beaconData);
-      console.log("[HL] sendBeacon attempted →", ok);
       if (ok) return true;
     } catch (err) {
       console.error("[HL] sendBeacon error", err?.message || err);
@@ -87,7 +84,6 @@ export default function LogDocumentModal({ show, onClose, clientId, initialBurea
       const qs = encodeURIComponent(JSON.stringify(payload));
       const img = new Image();
       img.src = `${HL_WEBHOOK_URL}?payload=${qs}`;
-      console.log("[HL] image GET fallback fired");
       return true; // fire-and-forget
     } catch (err) {
       console.error("[HL] image fallback error", err?.message || err);

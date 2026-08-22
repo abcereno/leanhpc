@@ -14,6 +14,23 @@
 // Balance). Removed rather than fixed in place — two parsers producing two
 // different shapes for the same file is what caused the drift; RegenerateHistoryBtn.jsx
 // now calls runAuditEngine() directly, same as every other import path.
+//
+// 2026-08-22: the functions below (detectProfileChanges, compareSnapshots)
+// compare two STORED snapshots (client_audit_report.json /
+// *_summary_report.json), which can come from either runAuditEngine's
+// shape above OR the credit_analysis edge function's shape (the actual
+// live SmartCredit import/update path — see Fetch3bModal.jsx/
+// ClientHeader.jsx) depending on which flow last wrote them. Those two
+// shapes disagree on almost every field name that matters here (numeric
+// vs object scores, summary.utilization_pct vs top-level
+// utilization.usagePct, creditor/accountNumberLast4/late30 vs
+// name/account_num/tags, public_records vs the never-actually-used
+// publicRecords). Both functions now normalize through
+// utils/normalizeCreditSnapshot.js first so it doesn't matter which
+// parser produced either snapshot being compared — see that file for the
+// full field-mapping reasoning.
+
+import { normalizeCreditSnapshot } from "./normalizeCreditSnapshot";
 
 // Helper: Normalize Bureau
 export function bureauKey(s) {
@@ -25,27 +42,32 @@ export function bureauKey(s) {
 }
 
 // Helper: Identify Negatives — used by detectProfileChanges() below to spot
-// new collections/charge-offs between two audit snapshots.
+// new collections/charge-offs between two audit snapshots. Operates on
+// normalized accounts (type/status field names are shared by both source
+// shapes already, so no translation needed here).
 function isCollection(a) {
-  const t = (a.type || a.specificAccountType || "").toLowerCase();
-  const s = (a.status || a.accountCondition || "").toLowerCase();
+  const t = (a.type || "").toLowerCase();
+  const s = (a.status || "").toLowerCase();
   return t.includes("coll") || s.includes("collection") || s.includes("charge off") || s.includes("charge-off") || s.includes("profit and loss");
 }
 
 function isChargeOff(a) {
-  const s = (a.status || a.accountCondition || "").toLowerCase();
+  const s = (a.status || "").toLowerCase();
   return s.includes("charge off") || s.includes("charge-off") || s.includes("profit and loss");
 }
 
 // --- DELTA ANALYSIS ENGINE (Triggers the 14 Emails) ---
-export function detectProfileChanges(oldReport, newReport) {
-    if (!oldReport || !newReport) return [];
-    
+export function detectProfileChanges(oldReportRaw, newReportRaw) {
+    if (!oldReportRaw || !newReportRaw) return [];
+
+    const oldReport = normalizeCreditSnapshot(oldReportRaw);
+    const newReport = normalizeCreditSnapshot(newReportRaw);
+
     const events = new Set(); // Using Set to avoid duplicates
 
     // 1. Positive Score Movement
-    if ((newReport.scores.EX > oldReport.scores.EX) || 
-        (newReport.scores.TU > oldReport.scores.TU) || 
+    if ((newReport.scores.EX > oldReport.scores.EX) ||
+        (newReport.scores.TU > oldReport.scores.TU) ||
         (newReport.scores.EQ > oldReport.scores.EQ)) {
         events.add("positive_score_movement");
     }
@@ -73,10 +95,19 @@ export function detectProfileChanges(oldReport, newReport) {
     const oldCO = oldReport.accounts.filter(isChargeOff).length;
     if (newCO > oldCO) events.add("new_charge_off");
 
-    // 8. Account Closure Detected
+    // 8. Account Closure Detected — matched on creditor + last-4 account
+    // number, both real fields on the normalized shape now (previously
+    // compared fields neither source shape actually populated, so every
+    // "old open account" matched the first entry in newReport.accounts
+    // regardless of identity — harmless only because the following
+    // .openClosed check happened to read another wrong field name too).
     const oldOpen = oldReport.accounts.filter(a => (a.openClosed || "").toLowerCase().includes("open"));
     for (const oldAcct of oldOpen) {
-        const matchedNew = newReport.accounts.find(a => a.creditor === oldAcct.creditor && a.accountNumberLast4 === oldAcct.accountNumberLast4);
+        if (!oldAcct.creditor && !oldAcct.accountNumberLast4) continue;
+        const matchedNew = newReport.accounts.find(a =>
+            a.creditor === oldAcct.creditor &&
+            a.accountNumberLast4 === oldAcct.accountNumberLast4
+        );
         if (matchedNew && (matchedNew.openClosed || "").toLowerCase().includes("closed")) {
             events.add("account_closure");
             break;
@@ -84,13 +115,13 @@ export function detectProfileChanges(oldReport, newReport) {
     }
 
     // 9. Balance Increase Detected
-    if (newReport.summary.total_balance > oldReport.summary.total_balance) events.add("balance_increase");
+    if (newReport.summary.totalBalance > oldReport.summary.totalBalance) events.add("balance_increase");
 
     // 10. Fraud Alert Detected
     if ((newReport.fraudAlerts?.length || 0) > (oldReport.fraudAlerts?.length || 0)) events.add("fraud_alert");
 
     // 11. Credit Limit Decrease Detected (Only if total limits dropped, ignores closures)
-    if (newReport.summary.total_limit < oldReport.summary.total_limit && newReport.summary.total_limit > 0) events.add("limit_decrease");
+    if (newReport.summary.totalLimit < oldReport.summary.totalLimit && newReport.summary.totalLimit > 0) events.add("limit_decrease");
 
     // 12. High Utilization Warning Detected
     if (newReport.summary.utilization > 30 && oldReport.summary.utilization <= 30) events.add("high_utilization_warning");
@@ -99,7 +130,7 @@ export function detectProfileChanges(oldReport, newReport) {
     if ((newReport.publicRecords?.length || 0) > (oldReport.publicRecords?.length || 0)) events.add("new_bankruptcy");
 
     // 14. Previously Removed Account Reappeared (Reinsertion)
-    const addedItems = compareSnapshots(oldReport, newReport);
+    const addedItems = compareSnapshots(oldReportRaw, newReportRaw);
     const totalAdded = addedItems.EX.added.length + addedItems.TU.added.length + addedItems.EQ.added.length;
     if (totalAdded > 0) {
         // If an item was added but it has an old open date, it's likely a reinsertion
@@ -123,24 +154,24 @@ export function detectProfileChanges(oldReport, newReport) {
 // symptom — the comparison had no way to tell two same-creditor accounts
 // apart. Account number is the real identity when the bureau reports it;
 // name alone is only a fallback for the (normal) case where it's masked.
+//
+// Both snapshots are normalized first (see utils/normalizeCreditSnapshot.js)
+// — credit_analysis-shaped negatives carry no account-number field at all
+// on their own, but the normalizer derives one from the matching account
+// in the same report, so this stays account-number-precise regardless of
+// which parser produced either snapshot.
 function normalizeName(name) {
   return name?.toUpperCase().replace(/[^A-Z0-9]/g, "").substring(0, 10) || "";
 }
 
-function matchKey(item, getName) {
-  const name = normalizeName(getName(item));
-  // `accountNumberLast4` was the old analyzeRawReport() parser's field name;
-  // `account_num` is runAuditEngine's (the one actually used by every real
-  // snapshot) — checking both means this works regardless of which parser
-  // produced the file being compared. Only the last 4 digits are used
-  // either way, since account_num can be a longer/partially-masked string.
-  const rawAcct = item.accountNumberLast4 || item.account_num || item.account_number || "";
-  const last4 = String(rawAcct).replace(/[^0-9]/g, "").slice(-4);
+function matchKey(item) {
+  const name = normalizeName(item.account);
+  const last4 = String(item.accountNumberLast4 || "").replace(/[^0-9]/g, "").slice(-4);
   if (!name && !last4) return null; // never match two unidentifiable items to each other
   return last4 ? `${name}#${last4}` : name;
 }
 
-export function compareSnapshots(startReport, currentReport) {
+export function compareSnapshots(startReportRaw, currentReportRaw) {
   const bureaus = ["EX", "TU", "EQ"];
   const comparison = {
     EX: { deleted: [], remaining: [], added: [] },
@@ -148,23 +179,24 @@ export function compareSnapshots(startReport, currentReport) {
     EQ: { deleted: [], remaining: [], added: [] }
   };
 
-  const getName = (item) => item.name || item.account || "Unknown";
+  const startReport = normalizeCreditSnapshot(startReportRaw) || { negatives: [] };
+  const currentReport = normalizeCreditSnapshot(currentReportRaw) || { negatives: [] };
 
   bureaus.forEach(bureau => {
     const startItems = (startReport.negatives || []).filter(n => bureauKey(n.bureau) === bureau);
     const currentItems = (currentReport.negatives || []).filter(n => bureauKey(n.bureau) === bureau);
 
     startItems.forEach(item => {
-      const key = matchKey(item, getName);
-      const stillExists = key && currentItems.find(curr => matchKey(curr, getName) === key);
-      if (!stillExists) comparison[bureau].deleted.push({ ...item, account: getName(item) });
-      else comparison[bureau].remaining.push({ ...item, account: getName(item) });
+      const key = matchKey(item);
+      const stillExists = key && currentItems.find(curr => matchKey(curr) === key);
+      if (!stillExists) comparison[bureau].deleted.push(item);
+      else comparison[bureau].remaining.push(item);
     });
 
     currentItems.forEach(item => {
-      const key = matchKey(item, getName);
-      const existedBefore = key && startItems.find(start => matchKey(start, getName) === key);
-      if (!existedBefore) comparison[bureau].added.push({ ...item, account: getName(item) });
+      const key = matchKey(item);
+      const existedBefore = key && startItems.find(start => matchKey(start) === key);
+      if (!existedBefore) comparison[bureau].added.push(item);
     });
   });
 

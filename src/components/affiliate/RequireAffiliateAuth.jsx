@@ -7,8 +7,6 @@ export default function RequireAffiliateAuth() {
   const { affiliateId, loading, error } = useAffiliateAuth();
   const location = useLocation();
 
-  console.log("RequireAffiliateAuth:", { affiliateId, loading, error });
-
   if (loading) {
     return (
       <Container

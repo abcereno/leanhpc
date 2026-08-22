@@ -147,22 +147,6 @@ export default function ProductionQueue({
                 className={`btn btn-sm ${bucket ? "" : active ? "btn-primary" : "cmd-btn"}`}
                 style={bucketStyle}
                 onClick={() => {
-                  // Debug aid: log exactly which clients this chip matches
-                  // (same date-narrowed pool the badge count reads from) so
-                  // it can be eyeballed/copied against an external list
-                  // without needing direct DB access.
-                  const matched = f.key === "all" ? dateNarrowedPool : dateNarrowedPool.filter((c) => f.predicate(c));
-                  console.log(`[Production Queue] "${f.label}" — ${matched.length} client(s)`);
-                  console.table(
-                    matched.map((c) => ({
-                      name: c.full_name,
-                      company: c.companies?.company_name,
-                      days: c.agingDaysCurrent,
-                      counts: c.start_inquiries,
-                      paid: c.is_paid,
-                      completed: !!c.date_completed,
-                    }))
-                  );
                   setActiveFilter(f.key);
                 }}
               >

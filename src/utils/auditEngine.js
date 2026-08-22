@@ -81,8 +81,6 @@ export function runAuditEngine(rawData) {
 
       // 👇 NEW BACKUP RULE: Force-inject record if bankruptcy is hiding in the factors 👇
       if (bankruptcyDetectedViaFactors && audit.public_records.length === 0) {
-          console.log("⚠️ Hidden Bankruptcy intercepted via scoring factor codes! Injecting fallback tracking row.");
-          
           const bkFallbackItem = {
               type: "Bankruptcy Chapter 7 or 13 (Derived)",
               bureau: "EX, TU",

@@ -8,10 +8,8 @@ import { Spinner } from "react-bootstrap";
 
 // Components & Listeners
 import ToastProvider from "./components/shared/ui/ToastNotifier";
-import ClientSubmissionListener from "./components/admin/ClientSubmissionListener";
 import AdminServiceOrders from "./components/admin/AdminServiceOrders";
 import CountReviewQueue from "./components/admin/CountReviewQueue";
-import AdminNotificationWatcher from "./components/admin/AdminNotificationWatcher";
 // Layouts & Guards
 import AdminLayout from "./components/admin/AdminLayout";
 import MainLayout from "./components/shared/layout/MainLayout";
@@ -49,6 +47,7 @@ import Login from "./components/shared/auth/Login";
 import ResetPassword from "./components/shared/auth/ResetPassword";
 import UpdatePassword from "./components/shared/auth/UpdatePassword";
 import PublicClientReceipt from "./components/shared/public/PublicClientReceipt";
+import ClassicReportPage from "./components/shared/public/ClassicReportPage";
 import ClientReportPage from "./components/shared/client-pages/ClientReportPage";
 import CompanyDirectory from "./components/admin/CompanyDirectory";
 import CompanyLayout from "./components/shared/public/CompanyLayout";
@@ -131,13 +130,18 @@ export default function App() {
           <ToastProvider>
             <CompanyAuthProvider>
               <AffiliateAuthProvider>
-                
-                {/* Cleaned up listener (no more props) */}
-                <ClientSubmissionListener /> 
-                
-                {/* NEW: Background watcher for Document & Payment notifications! */}
-                <AdminNotificationWatcher />
-                
+
+                {/* ClientSubmissionListener (the "Pipeline" queue widget) and
+                    AdminNotificationWatcher used to be mounted globally here,
+                    visible on every route including public/client-facing
+                    pages (e.g. /classic-report/:token, /receipt/:token) any
+                    time an admin happened to be logged in — gated only by a
+                    hand-maintained hiddenRoutes blocklist that every new
+                    public route had to remember to add itself to, or it
+                    leaked internal queue data. Both are admin-only tools, so
+                    they're now mounted once inside AdminLayout.jsx instead —
+                    structurally scoped to the actual admin route tree, so a
+                    new public page can't leak them just by existing. */}
                 <AppRoutes />
 
               </AffiliateAuthProvider>
@@ -333,6 +337,7 @@ function AppRoutes() {
           <Route path="/terms-and-conditions" element={<TermsAndConditions />} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/receipt/:token" element={<PublicClientReceipt />} />
+          <Route path="/classic-report/:token" element={<ClassicReportPage />} />
           <Route path="/clients/:clientId/report" element={<ClientReportPage />} />
           <Route path="/clients/:clientId/funding" element={<ClientFundingBlueprintPage />} />
           <Route path="/company/:companyId/add-clients" element={<AddClientForm />} />

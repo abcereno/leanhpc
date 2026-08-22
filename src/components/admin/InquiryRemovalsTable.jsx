@@ -73,7 +73,6 @@ export default function InquiryLogViewer() {
     groupedTableData[key].count += log.removed_count;
   });
   const groupedRows = Object.values(groupedTableData);
-  console.log("Grouped Rows:", groupedRows);
   const byBureau = filtered.reduce((acc, log) => {
     acc[log.bureau] = (acc[log.bureau] || 0) + log.removed_count;
     return acc;

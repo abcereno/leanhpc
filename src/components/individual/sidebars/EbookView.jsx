@@ -98,7 +98,6 @@ export default function EbookView({ client }) {
             filter: `client_id=eq.${client.id}`,
           },
           (payload) => {
-            console.log("🎉 New book unlocked via Webhook!", payload);
             // Instantly add the new ebook_id to state so the UI unlocks
             setUnlockedEbooks((prev) => [...prev, payload.new.ebook_id]);
           }

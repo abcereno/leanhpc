@@ -4,8 +4,7 @@ import CoverLetterAssets from "../../admin/client-profile/CoverLetterAssets";
 import ConsumerDocuments from "../sub-components/ConsumerDocuments";
 export default function ProfileStep2({ clientId, onNext, onBack }) {
     // Placeholder state if you need to validate uploads before proceeding
-    const [links, setLinks] = useState({}); 
-    console.log(links);
+    const [, setLinks] = useState({});
     return (
       <>
          <Card className="shadow-lg border-0">

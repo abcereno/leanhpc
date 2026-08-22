@@ -79,8 +79,6 @@ export default function RegenerateHistoryBtn({ clientId, onComplete }) {
                         console.warn("Date extraction failed, using fallback.", dateErr);
                     }
 
-                    console.log(`Saving ${fileName} snapshot as Date: ${reportDate}`);
-
                     const snapshotPath = `${clientId}/${reportDate}_summary_report.json`;
                     await supabase.storage
                         .from("clients")
@@ -95,7 +93,6 @@ export default function RegenerateHistoryBtn({ clientId, onComplete }) {
 
             const hasRaw = fileList.find(f => f.name === 'raw_credit_report.json');
             if (hasRaw) {
-                console.log("Processing Initial Baseline...");
                 // Note: The fallback is still 2020-01-01, but the smarter logic should find the real date now!
                 const success = await processAndSaveSnapshot('raw_credit_report.json', '2020-01-01');
                 if (success) processedCount++;
@@ -103,14 +100,12 @@ export default function RegenerateHistoryBtn({ clientId, onComplete }) {
 
             const hasCurrent = fileList.find(f => f.name === 'credit_analysis.json');
             if (hasCurrent) {
-                console.log("Processing Current Snapshot...");
                 const today = new Date().toISOString().split('T')[0];
                 const success = await processAndSaveSnapshot('credit_analysis.json', today);
                 if (success) processedCount++;
             }
 
             if (processedCount === 1 && hasRaw) {
-                console.log("Only 1 report found. Duplicating as Current so Progress UI works.");
                 const today = new Date().toISOString().split('T')[0];
                 await processAndSaveSnapshot('raw_credit_report.json', today);
                 processedCount++;

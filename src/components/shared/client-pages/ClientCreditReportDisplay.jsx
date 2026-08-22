@@ -1,24 +1,12 @@
 // src/components/ClientCreditReportDisplay.jsx
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Spinner, Alert } from 'react-bootstrap';
 import { useClientCreditFiles } from '../../../hooks/useClientCreditFiles';
 import CreditAuditReport from './CreditAuditReport';
 
 export default function ClientCreditReportDisplay({ clientId }) {
   // Use the hook that fetches 'raw_credit_report.json' and processes it
-  const { loading, error, auditReport, normalized } = useClientCreditFiles(clientId);
-
-  // --- DEBUG LOGGING ---
-  useEffect(() => {
-    console.group("🔍 ClientCreditReportDisplay Debug");
-    console.log("Client ID:", clientId);
-    console.log("Loading State:", loading);
-    console.log("Error State:", error);
-    console.log("Audit Report (Parsed):", auditReport);
-    console.log("Legacy Normalized Data:", normalized);
-    console.groupEnd();
-  }, [clientId, loading, error, auditReport, normalized]);
-  // ---------------------
+  const { loading, error, auditReport } = useClientCreditFiles(clientId);
 
   if (loading) {
     return (

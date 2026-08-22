@@ -12,9 +12,7 @@ export default function UnderReview() {
   // The core verification function
   const verifyStatus = async () => {
     setChecking(true);
-    console.log("=====================================");
-    console.log("🚀 STARTING ACCOUNT STATUS CHECK...");
-    
+
     try {
       // 1. Get the current logged-in user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -27,7 +25,6 @@ export default function UnderReview() {
       }
 
       const userId = user.id;
-      console.log(`👤 Logged in Auth ID: ${userId}`);
 
       // 2. Check Partners (Companies)
       const { data: company } = await supabase
@@ -72,7 +69,6 @@ export default function UnderReview() {
       setLoading(false);
     } finally {
       setChecking(false);
-      console.log("=====================================");
     }
   };
 
@@ -84,8 +80,6 @@ export default function UnderReview() {
 // 👇 UPDATED: Real Supabase Sign Out + Storage Wipe 👇
   const handleLogout = async () => {
     try {
-      console.log("Signing out...");
-      
       // 1. Terminate the Supabase session (This handles the Supabase tokens)
       const { error } = await supabase.auth.signOut();
       if (error) throw error;

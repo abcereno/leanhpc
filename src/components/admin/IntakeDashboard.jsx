@@ -153,7 +153,6 @@ export default function IntakeDashboard() {
       </Container>
     );
   }
-console.log(rows);
 
   return (
     <Container className="py-4">

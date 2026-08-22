@@ -13,6 +13,7 @@ import { serviceLabel, resolveServiceId } from "../../../utils/services";
 import { usePiReveal } from "../../../hooks/usePiReveal";
 import { useClientActions } from "../../../hooks/useClientActions";
 import { useReceiptGenerator } from "../../../hooks/useReceiptGenerator";
+import { useClassicReportLink } from "../../../hooks/useClassicReportLink";
 import { useAuthorizationHolds } from "../../../hooks/useAuthorizationHolds";
 
 import useInquiriesThread from "../../../hooks/useInquiriesThread";
@@ -191,6 +192,7 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
   const pi = usePiReveal(canEdit);
   const actions = useClientActions(clientId, client, refetch, onRefresh);
   const receipt = useReceiptGenerator(clientId, agentDisplay, refetch, onRefresh);
+  const classicReport = useClassicReportLink(clientId, refetch);
 
   // Hook for thread logic
   const { markAllNonLinkedAsDeleted, markAllNonLinkedAsDND } = useInquiriesThread({ clientId });
@@ -316,20 +318,19 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
         completed_at: new Date().toISOString(),
       };
 
-      console.log("🚀 Manual Override Webhook Firing:", payload);
-
       try {
-        await fetch(COMPLETION_WEBHOOK_URL, { 
-            method: "POST", 
-            headers: { "Content-Type": "application/json" }, 
-            body: JSON.stringify(payload) 
+        await fetch(COMPLETION_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
         });
-        console.log("✅ Webhook fired successfully!");
       } catch (e) {
         console.error("❌ Webhook failed:", e);
-        try { 
-            await fetch(COMPLETION_WEBHOOK_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); 
-        } catch(e2) {}
+        try {
+            await fetch(COMPLETION_WEBHOOK_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        } catch (e2) {
+            console.error("❌ Webhook fallback also failed:", e2);
+        }
       }
   };
 
@@ -578,6 +579,10 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                   </div>
                   <button className="btn btn-sm btn-dark border-secondary text-info" onClick={() => setActiveModal("generateInvoice")} disabled={!canEdit}>
                     <i className="bi bi-receipt me-1" />Invoice Generator
+                  </button>
+                  <button className="btn btn-sm btn-dark border-secondary text-primary" onClick={classicReport.generateLink} disabled={!canEdit || classicReport.generating}>
+                    {classicReport.generating ? <Spinner size="sm" className="me-1" /> : <i className="bi bi-file-earmark-bar-graph me-1" />}
+                    Classic Report Link
                   </button>
                 </div>
               )}

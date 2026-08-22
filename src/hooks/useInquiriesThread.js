@@ -133,11 +133,8 @@ export default function useInquiriesThread({
       completed_at: new Date().toISOString(),
     };
 
-    console.log("🚀 Firing 100% Webhook Payload to LeadConnector:", payload);
-
     try {
-      const res = await fetch(COMPLETION_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      console.log("✅ Webhook response status:", res.status);
+      await fetch(COMPLETION_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     } catch (e) {
       console.error("❌ Error sending completion webhook:", e);
       try { await fetch(COMPLETION_WEBHOOK_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); } catch(e2) {console.log(e2);}
@@ -476,8 +473,7 @@ export default function useInquiriesThread({
         const statuses = { exp: expStatus === "done", tu: tuStatus === "done", eq: eqStatus === "done" };
         
         if ((isFullyCompleted && !prevIsFullyCompleted) || forceWebhook) {
-             console.log("🎉 Progress hit 100% or Forced! Firing webhook...");
-             await sendCompletionWebhook({ 
+             await sendCompletionWebhook({
                  clientId: id, 
                  statuses, 
                  newlyCompleted: { exp: true, tu: true, eq: true },
@@ -541,7 +537,6 @@ export default function useInquiriesThread({
 
         previousThreadRef.current = grouped;
 
-        console.log("Hook: Save successful");
         return true;
 
     } catch (e) {
@@ -554,8 +549,6 @@ export default function useInquiriesThread({
   }, [accounts, inquiries, id, userId, propAdminName, propClientName, updateCounts_, logAction, hasPermission, addToast, syncCountReviewRequests, fetchApprovedCounts]);
 
   const generateDisputeLetters = useCallback(async (round = 1, isFastResolution = false) => {
-    console.log("🚀 Starting generation...", { round, isFastResolution, APP_SCRIPT_URL, id });
-
     if (!APP_SCRIPT_URL || !id) {
         if (!APP_SCRIPT_URL) addToast({ title: "Configuration Error", message: "VITE_APP_SCRIPT_URL is missing in your .env file.", variant: "danger", icon: "bi-exclamation-triangle-fill" });
         return;
@@ -596,7 +589,7 @@ export default function useInquiriesThread({
         if (path.startsWith("http")) return path; 
         
         const cleanPath = path.replace(/^cover-letter-assets\//, "");
-        const { data, error } = await supabase.storage.from("cover-letter-assets").createSignedUrl(cleanPath, 300); 
+        const { data } = await supabase.storage.from("cover-letter-assets").createSignedUrl(cleanPath, 300);
         return data?.signedUrl || null;
       };
 
@@ -651,7 +644,6 @@ export default function useInquiriesThread({
           addToast({ title: "Letters Generated", message: `Round ${round} letters saved to the Documents tab.`, variant: "success", icon: "bi-file-earmark-check-fill" });
       } else {
           addToast({ title: "Generation Failed", message: "Please check the browser console for details.", variant: "danger", icon: "bi-exclamation-triangle-fill" });
-          console.log("App Script Results:", results);
       }
 
     } catch (err) {

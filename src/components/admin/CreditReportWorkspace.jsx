@@ -106,7 +106,6 @@ export default function CreditReportWorkspace({ clientId: propClientId }) {
       const rawJsonData = JSON.parse(rawText);
 
       const normalizedAudit = parseSmartCredit(rawJsonData);
-      console.log("=== PARSED SMARTCREDIT AUDIT OBJECT ===", normalizedAudit);
       setParsedReport(normalizedAudit);
 
       const rulesAnalysis = calculateFundingEligibility(normalizedAudit, settings);
@@ -183,9 +182,6 @@ export default function CreditReportWorkspace({ clientId: propClientId }) {
   const handleSelectClient = (selectedId) => {
     setSearchTerm("");
     setShowResults(false);
-    
-    // Safely matches your precise App.jsx route wrapper context
-    var routeParamName = params.urlClientId ? "urlClientId" : (params.id ? "id" : "clientId");
     navigate("/funding-workspace/" + selectedId);
   };
 

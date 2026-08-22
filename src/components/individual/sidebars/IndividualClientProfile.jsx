@@ -76,8 +76,7 @@ export default function IndividualClientProfile({ clientId }) {
   };
 
   const onImportComplete = () => {
-      console.log("Import complete, refreshing data...");
-      refetchClient(); 
+      refetchClient();
       setCreditRefresh(prev => prev + 1); 
       setManualOverride(false);
   };

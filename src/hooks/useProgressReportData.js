@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { compareSnapshots } from '../utils/creditAnalysis'; 
+import { compareSnapshots } from '../utils/creditAnalysis';
+import { normalizeScoreValue } from '../utils/normalizeCreditSnapshot';
 
 export function useProgressReportData(clientId) {
   const [loading, setLoading] = useState(true);
@@ -19,7 +20,6 @@ export function useProgressReportData(clientId) {
       
       try {
         setLoading(true);
-        console.log(`🔍 Fetching report data for client: ${clientId}`);
 
         // --- 1. FETCH CLIENT PROFILE ---
         const { data: client, error: clientErr } = await supabase
@@ -76,8 +76,6 @@ export function useProgressReportData(clientId) {
         const baselineFile = reportFiles[0].name;
         const currentFile = reportFiles[reportFiles.length - 1].name;
 
-        console.log(`📊 Comparing baseline ${baselineFile} vs current ${currentFile}`);
-
         const startJson = await downloadJson(baselineFile);
         const currentJson = await downloadJson(currentFile);
 
@@ -88,16 +86,11 @@ export function useProgressReportData(clientId) {
         // --- 5. RUN THE SHARED COMPARISON MATH ---
         const comparison = compareSnapshots(startJson, currentJson);
 
-        // --- 6. HELPERS: SAFE SCORE & DATE EXTRACTION ---
-        const getScoreValue = (bureauData) => {
-            if (!bureauData) return 0;
-            if (typeof bureauData === 'number') return bureauData;
-            if (typeof bureauData === 'string') return parseInt(bureauData, 10) || 0;
-            if (typeof bureauData === 'object') {
-                return parseInt(bureauData.score || bureauData.riskScore || bureauData.Score, 10) || 0;
-            }
-            return 0;
-        };
+        // Score value can be a plain number, a numeric string, or an object
+        // like {score,riskScore,Score} depending on which parser wrote this
+        // snapshot (see utils/normalizeCreditSnapshot.js) — shared with
+        // compareSnapshots/detectProfileChanges instead of a local copy.
+        const getScoreValue = normalizeScoreValue;
 
         // 🎯 Timezone-Proof Date Extractor (Pulls directly from the filename)
         const extractDateFromFilename = (filename) => {
@@ -108,7 +101,7 @@ export function useProgressReportData(clientId) {
                 
                 // Manually format to MM/DD/YYYY so timezones don't accidentally shift it back a day!
                 return `${parseInt(month, 10)}/${parseInt(day, 10)}/${year}`;
-            } catch (e) {
+            } catch {
                 return "Unknown Date";
             }
         };

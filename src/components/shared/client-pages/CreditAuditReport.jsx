@@ -22,12 +22,6 @@ const getScoreColor = (s) => {
 const safeArray = (arr) => (Array.isArray(arr) ? arr : []);
 
 export default function CreditAuditReport({ data }) {
-    React.useEffect(() => {
-        console.group("🔍 CreditAuditReport Debug");
-        console.debug("CreditAuditReport received data:", data);
-        console.groupEnd();
-    }, [data]);
-    
   if (!data) return <div className="p-5 text-center text-muted">No Audit Data Available</div>;
 
   const { scores, summary, negatives, personal, inquiries, meta } = data;

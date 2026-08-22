@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../../../supabaseClient";
 import { useAuth } from "../../../context/AuthContext";
 import useLogger from "../../../hooks/useLogger"; // 1. Import Logger
@@ -7,6 +7,40 @@ import useLogger from "../../../hooks/useLogger"; // 1. Import Logger
 const PRIMARY_BUCKET = "cover-letter-assets";
 // Legacy bucket for OLD uploads (Admin side)
 const LEGACY_BUCKET = "clients";
+
+// "Today" / "Yesterday" / full date — same relative-label convention most
+// file browsers and chat apps use, so a busy documents list (letters +
+// identity docs + client uploads all mixed together) reads as a timeline
+// instead of a flat, undated table.
+function formatGroupLabel(date) {
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+}
+
+function formatTime(date) {
+  return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+// Buckets documents by calendar day for the grouped list below. Relies on
+// `documents` already arriving sorted created_at desc (the fetch query
+// below orders it that way), so building groups in a single pass over that
+// order — via a Map, which preserves insertion order — keeps both the
+// groups themselves and each group's rows newest-first with no extra sort.
+function groupDocumentsByDay(documents) {
+  const groups = new Map();
+  documents.forEach((doc) => {
+    const created = doc.created_at ? new Date(doc.created_at) : null;
+    const key = created ? created.toDateString() : "unknown";
+    if (!groups.has(key)) {
+      groups.set(key, { key, label: created ? formatGroupLabel(created) : "Unknown Date", docs: [] });
+    }
+    groups.get(key).docs.push(doc);
+  });
+  return Array.from(groups.values());
+}
 
 // 👇 Added refreshKey to props 👇
 export default function DocumentsSection({ clientId, readonly = false, refreshKey }) {
@@ -23,6 +57,8 @@ export default function DocumentsSection({ clientId, readonly = false, refreshKe
   
   // 2. Initialize Logger
   const logAction = useLogger();
+
+  const groupedDocuments = useMemo(() => groupDocumentsByDay(documents), [documents]);
 
   useEffect(() => {
     if (!clientId) return;
@@ -91,14 +127,12 @@ export default function DocumentsSection({ clientId, readonly = false, refreshKe
       // 1. CHECK FOR EXTERNAL LINKS (Google Docs, Drive, etc.)
       // If it starts with http/https, just open it!
       if (doc.file_url && (doc.file_url.startsWith("http://") || doc.file_url.startsWith("https://"))) {
-          console.log("🔗 Opening external link:", doc.file_url);
           window.open(doc.file_url, "_blank");
           return;
       }
 
       // 2. INTERNAL SUPABASE FILES (Legacy Logic)
       const path = cleanPath(doc.file_url);
-      console.log(`🔍 Opening file. Original: ${doc.file_url} -> Cleaned: ${path}`);
 
       // Try Primary Bucket
       let { data, error } = await supabase.storage
@@ -107,7 +141,6 @@ export default function DocumentsSection({ clientId, readonly = false, refreshKe
 
       // Try Legacy Bucket if primary fails
       if (error || !data?.signedUrl) {
-         console.log("⚠️ Not found in primary bucket, checking legacy...");
          const { data: legacyData, error: legacyError } = await supabase.storage
             .from(LEGACY_BUCKET)
             .createSignedUrl(path, 60);
@@ -311,58 +344,64 @@ export default function DocumentsSection({ clientId, readonly = false, refreshKe
           </div>
         ) : (
           <div className="table-responsive">
-            <table className="table table-hover align-middle">
-              <thead>
-                <tr>
-                  <th>File Name</th>
-                  <th style={{ width: '140px', textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {documents.map((doc) => (
-                  <tr key={doc.id}>
-                    <td>
-                      <div className="d-flex align-items-center">
-                        <i className="bi bi-file-earmark-text me-2 text-primary"></i>
-                        <span className="text-truncate" style={{maxWidth: '200px'}} title={doc.file_name}>{doc.file_name}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="d-flex flex-nowrap gap-2 justify-content-end">
-                        <button
-                          className="btn btn-sm btn-primary"
-                          onClick={() => handleViewFile(doc)}
-                          title="View"
-                        >
-                          <i className="bi bi-eye"></i>
-                        </button>
-                        
-                        <button
-                           type="button"
-                           className="btn btn-sm btn-secondary"
-                           onClick={() => handleViewFile(doc)}
-                           title="Download"
-                        >
-                          <i className="bi bi-download"></i>
-                        </button>
+            {groupedDocuments.map((group) => (
+              <div key={group.key} className="mb-3">
+                <div className="text-uppercase text-muted small fw-bold mb-1 px-1" style={{ letterSpacing: "0.05em", fontSize: 11 }}>
+                  {group.label}
+                </div>
+                <table className="table table-hover align-middle mb-2">
+                  <tbody>
+                    {group.docs.map((doc) => (
+                      <tr key={doc.id}>
+                        <td className="py-3">
+                          <div className="d-flex align-items-center">
+                            <i className="bi bi-file-earmark-text me-2 text-primary"></i>
+                            <div className="d-flex flex-column">
+                              <span className="text-truncate" style={{maxWidth: '200px'}} title={doc.file_name}>{doc.file_name}</span>
+                              {doc.created_at && (
+                                <span className="text-muted" style={{ fontSize: 11 }}>{formatTime(new Date(doc.created_at))}</span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3">
+                          <div className="d-flex flex-nowrap gap-2 justify-content-end">
+                            <button
+                              className="btn btn-sm btn-primary"
+                              onClick={() => handleViewFile(doc)}
+                              title="View"
+                            >
+                              <i className="bi bi-eye"></i>
+                            </button>
 
-                        {(!readonly && canDeleteDocuments) && (
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-danger"
-                            onClick={() => handleDeleteFile(doc)}
-                            disabled={uploading}
-                            title="Delete"
-                          >
-                            <i className="bi bi-trash"></i>
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                            <button
+                               type="button"
+                               className="btn btn-sm btn-secondary"
+                               onClick={() => handleViewFile(doc)}
+                               title="Download"
+                            >
+                              <i className="bi bi-download"></i>
+                            </button>
+
+                            {(!readonly && canDeleteDocuments) && (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-danger"
+                                onClick={() => handleDeleteFile(doc)}
+                                disabled={uploading}
+                                title="Delete"
+                              >
+                                <i className="bi bi-trash"></i>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -8,6 +8,7 @@ import { Toast, ToastContainer, Spinner } from "react-bootstrap";
 import AppFooter from "../shared/layout/AppFooter";
 import InquiryLoader from "../shared/ui/InquiryLoader";
 import AdminNotificationWatcher from "./AdminNotificationWatcher";
+import ClientSubmissionListener from "./ClientSubmissionListener";
 import AdminSidebar from "./AdminSidebar";
 import AdminNavbar from "./AdminNavbar"; 
 
@@ -23,8 +24,13 @@ export default function AdminLayout() {
 
   return (
     <>
-      {/* Background Logic & Notifications */}
+      {/* Background Logic & Notifications — both admin-only, mounted here
+          (not globally in App.jsx) so they're structurally scoped to the
+          admin route tree instead of relying on a hand-maintained blocklist
+          of "pages this shouldn't show on." See App.jsx's comment at the old
+          mount site for the incident that prompted this. */}
       <AdminNotificationWatcher />
+      <ClientSubmissionListener />
       <ToastContainer position="top-end" className="p-3" style={{ zIndex: 9999, position: 'fixed' }}>
         {notifications.map((note) => (
           <Toast key={note.id} onClose={() => removeNotification(note.id)} bg={note.type === 'success' ? 'success' : 'info'} autohide delay={5000}>

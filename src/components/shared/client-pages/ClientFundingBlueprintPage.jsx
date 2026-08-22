@@ -46,7 +46,7 @@ const extractScoresSafely = (rawData, cleanData) => {
           }
       });
       if (scores.exp !== "N/A" || scores.tu !== "N/A" || scores.eq !== "N/A") return scores;
-  } catch(e) {}
+  } catch { /* format not present, fall through to the next one */ }
 
   // 3. Check Raw IdentityIQ Format (Arrays)
   try {
@@ -60,7 +60,7 @@ const extractScoresSafely = (rawData, cleanData) => {
               else if (bureau.includes("eq") || bureau.includes("equi")) scores.eq = score;
           });
       }
-  } catch (e) {}
+  } catch { /* format not present, fall through */ }
 
   return scores;
 };
@@ -120,7 +120,6 @@ export default function ClientFundingBlueprintPage() {
         let rawReportData = null;
 
         const reportPath = `${clientId}/client_audit_report.json`;
-        console.log(`🔍 Pulling active audit file stream from: storage://${STORAGE_BUCKET}/${reportPath}`);
 
         const { data: fileBlob, error: downloadError } = await supabase.storage
           .from(STORAGE_BUCKET)

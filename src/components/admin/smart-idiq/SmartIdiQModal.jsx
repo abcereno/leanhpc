@@ -105,8 +105,6 @@ export default function SmartIdiQModal({ show, onClose }) {
 
         if (aiLogError) {
             console.error("⚠️ Failed to log to AI Training:", aiLogError.message);
-        } else {
-            console.log("✅ AI Training Log Saved");
         }
     } catch (logErr) {
         console.error("AI Log Exception:", logErr);
