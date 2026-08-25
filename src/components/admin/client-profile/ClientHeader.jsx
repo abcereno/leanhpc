@@ -15,6 +15,7 @@ import { useClientActions } from "../../../hooks/useClientActions";
 import { useReceiptGenerator } from "../../../hooks/useReceiptGenerator";
 import { useClassicReportLink } from "../../../hooks/useClassicReportLink";
 import { useAuthorizationHolds } from "../../../hooks/useAuthorizationHolds";
+import { useAlignmentDocs } from "../../../hooks/useAlignmentDocs";
 
 import useInquiriesThread from "../../../hooks/useInquiriesThread";
 
@@ -30,11 +31,24 @@ import RegenerateHistoryBtn from "../RegenerateHistoryBtn";
 
 const COMPLETION_WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/423af280-1504-4014-9f5e-f10b9bbc0985";
 
-// Matches CoverLetterAssets.jsx's ASSET_LABELS/VALIDATION_BADGES — kept as
-// a small local copy here rather than importing from a component file,
-// since these are just display labels for the docIssues badges below.
-const DOC_LABELS = { license: "Driver's License", ssn: "SSN Card", poa: "Proof of Address" };
+// Matches AlignmentCheckPanel.jsx's identityRows labels — kept as a small
+// local copy here rather than importing from a component file, since
+// these are just display labels for the docIssues badges below. Keyed by
+// the merged identity SLOT (useAlignmentDocs.js), not doc_type, so an
+// LTOS-origin document (e.g. a passport merged into the "license" slot)
+// still gets a sensible label.
+const DOC_LABELS = { license: "Photo ID", ssn: "SSN Card", poa: "Proof of Address", authorization: "Authorization (LPOA)" };
 const DOC_STATUS_LABELS = { expired: "Expired", invalid: "Invalid", needs_review: "Needs Review" };
+
+// AI-extracted SSN comes back as 9 raw digits (no dashes — see
+// supabase/functions/validate-document's extractedSsn) — formatted the
+// same as clients.ssn is displayed elsewhere so the two are easy to
+// compare at a glance.
+function formatSsn(digits) {
+  const clean = (digits || "").replace(/\D/g, "");
+  if (clean.length !== 9) return digits;
+  return `${clean.slice(0, 3)}-${clean.slice(3, 5)}-${clean.slice(5)}`;
+}
 
 // ─── Small pure helpers ───────────────────────────────────────────────────────
 
@@ -175,7 +189,7 @@ function RoundSwitcher({ clientId, email, currentRound }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ClientHeader({ clientId, onEdit, readonly = false, onRefresh }) {
+export default function ClientHeader({ clientId, onEdit, readonly = false, onRefresh, refreshKey }) {
   const { hasPermission } = useAuth();
   const canEdit = !readonly && hasPermission("edit_client");
 
@@ -204,34 +218,50 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
   const { holds: authHolds, refetch: refetchAuthHolds } = useAuthorizationHolds(clientId, client);
   const [pendingBureauAction, setPendingBureauAction] = useState(null);
 
-  // AI validity check (sql/add_document_validation.sql,
-  // supabase/functions/validate-document, wired from CoverLetterAssets.jsx)
-  // — surfaced here so staff sees an expired/invalid/needs-review document
-  // the instant they open the client, without needing to scroll to the
-  // Cover Letter Assets card. Warning-only, same as every other badge in
-  // this header — a point-in-time snapshot from page load, not a live
-  // subscription (matches how the EXP/TU/EQ DONE badges below work too).
-  const [docIssues, setDocIssues] = useState([]);
-  useEffect(() => {
-    if (!clientId) return;
-    let cancelled = false;
-    (async () => {
-      const { data, error: docErr } = await supabase
-        .from("client_documents")
-        .select("file_name, validation_status, validation_notes")
-        .eq("client_id", clientId)
-        .in("file_name", ["license", "ssn", "poa"])
-        .in("validation_status", ["expired", "invalid", "needs_review"]);
-      if (docErr) {
-        console.warn("Failed to load document validation status:", docErr.message);
-        return;
-      }
-      if (!cancelled) setDocIssues(data || []);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [clientId]);
+  // AI validity + alignment check (sql/add_document_validation.sql,
+  // sql/add_document_alignment_check.sql, supabase/functions/validate-document)
+  // — surfaced here so staff sees an expired/invalid/needs-review document,
+  // or a name/SSN/address mismatch, the instant they open the client,
+  // without needing to scroll to Cover Letter Assets / Alignment Check.
+  // Shared with AlignmentCheckPanel.jsx via useAlignmentDocs.js, which
+  // also merges in LTOS-origin documents (company portal / public intake
+  // uploads) that a doc_type-only query would miss — see that hook's
+  // header comment. Warning-only, same as every other badge in this
+  // header.
+  const { identityDocs } = useAlignmentDocs(clientId, refreshKey);
+
+  // Badge list for the header — any identity doc the AI flagged as
+  // expired/invalid/needs-review.
+  const docIssues = Object.entries(identityDocs)
+    .filter(([, row]) => row && ["expired", "invalid", "needs_review"].includes(row.validation_status))
+    .map(([slot, row]) => ({ slot, validation_status: row.validation_status, validation_notes: row.validation_notes }));
+
+  // "AI detected from ID" sub-lines for Personal Info — what the model
+  // actually read off the SSN card / proof-of-address document, extracted
+  // via supabase/functions/validate-document and stored in
+  // validation_details.extractedSsn/extractedAddress (see that file's
+  // ALIGNMENT CHECK section). Only SSN and Address have a document that
+  // extracts them today — license/identity docs only extract a name.
+  const aiSsn = identityDocs.ssn?.validation_details?.extractedSsn || null;
+  const aiAddress = identityDocs.poa?.validation_details?.extractedAddress || null;
+  const aiSublines = {
+    SSN: aiSsn ? { value: formatSsn(aiSsn), matched: identityDocs.ssn.validation_details.ssnMatch, source: "SSN Card" } : null,
+    Address: aiAddress ? { value: aiAddress, matched: identityDocs.poa.validation_details.addressMatch, source: "Proof of Address" } : null,
+  };
+
+  // There's no "Name" row in the Personal Info list above — the client's
+  // name is the page's own title, right in the header. So the AI-detected
+  // name (extracted off whichever identity document is on file — Photo ID
+  // first, then SSN card, then Proof of Address, in that priority order)
+  // is surfaced right under the name itself instead. `nameMatch` is
+  // computed identically for every doc type (see the edge function), so
+  // picking whichever doc has a value is safe — they're never in conflict
+  // for the SAME client since the comparison target (client.full_name) is
+  // the same every time.
+  const nameSourceDoc = identityDocs.license || identityDocs.ssn || identityDocs.poa || identityDocs.authorization || null;
+  const aiName = nameSourceDoc?.validation_details?.extractedName
+    ? { value: nameSourceDoc.validation_details.extractedName, matched: nameSourceDoc.validation_details.nameMatch }
+    : null;
 
   // Resolve agent display name
   useEffect(() => {
@@ -517,6 +547,19 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                 )}
               </div>
 
+              {/* AI-extracted name from the identity document on file —
+                  see aiName above. Sits right under the client's name so a
+                  mismatch (e.g. a misspelled name, or the wrong person's ID
+                  uploaded) is impossible to miss. */}
+              {aiName && (
+                <div className="d-flex align-items-center flex-wrap mb-2">
+                  <Badge bg={aiName.matched === false ? "danger" : aiName.matched === true ? "success" : "secondary"} className="shadow-sm">
+                    <i className={`bi ${aiName.matched === false ? "bi-exclamation-triangle-fill" : aiName.matched === true ? "bi-patch-check-fill" : "bi-robot"} me-1`} />
+                    AI detected from ID: {aiName.value}
+                  </Badge>
+                </div>
+              )}
+
               {/* Priority 1 (Authorization Protection) — a bureau shows up
                   here once its disputable count has grown past what's
                   already approved via Count Review. See
@@ -527,25 +570,6 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                     <Badge key={h.bureau} bg="danger" className="shadow-sm" title="Pending Count Review approval, or a manager override, before this can be marked complete">
                       <i className="bi bi-shield-lock-fill me-1"></i>
                       {h.bureau}: {h.actualCount} found · {h.approvedCount} approved · +{h.additionalNeeded} needs authorization
-                    </Badge>
-                  ))}
-                </div>
-              )}
-
-              {/* AI document validity check — warning only, see comment on
-                  the docIssues fetch above. */}
-              {docIssues.length > 0 && (
-                <div className="d-flex align-items-center flex-wrap gap-2 mb-2">
-                  {docIssues.map((d) => (
-                    <Badge
-                      key={d.file_name}
-                      bg="warning"
-                      text="dark"
-                      className="shadow-sm"
-                      title={d.validation_notes || "AI check flagged this document — see Cover Letter Assets below"}
-                    >
-                      <i className="bi bi-file-earmark-excel-fill me-1"></i>
-                      {DOC_LABELS[d.file_name] || d.file_name}: {DOC_STATUS_LABELS[d.validation_status] || d.validation_status}
                     </Badge>
                   ))}
                 </div>
@@ -651,12 +675,31 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                     ["Address",      client.address,              "(hidden)"],
                     ["DOB",          client.dob,                  "**/**/****"],
                     ["Logins/Notes", client.logins_notes || "—",  "(hidden)"],
-                  ].map(([label, value, placeholder]) => (
-                    <li key={label} className="list-group-item d-flex justify-content-between bg-light">
-                      <span className="text-muted">{label}:</span>
-                      <MaskedValue value={value} revealed={pi.piRevealed} placeholder={placeholder} />
-                    </li>
-                  ))}
+                  ].map(([label, value, placeholder]) => {
+                    // What the AI read directly off the ID/SSN card/proof-
+                    // of-address document — see aiSublines above. Shown
+                    // right under the value on file so a mismatch (colored
+                    // red) is obvious without leaving this card. Respects
+                    // the same reveal/hide toggle as the value itself so a
+                    // full SSN never sits in plaintext when hidden.
+                    const ai = aiSublines[label];
+                    return (
+                      <li key={label} className="list-group-item bg-light">
+                        <div className="d-flex justify-content-between">
+                          <span className="text-muted">{label}:</span>
+                          <MaskedValue value={value} revealed={pi.piRevealed} placeholder={placeholder} />
+                        </div>
+                        {ai && (
+                          <div
+                            className={`small text-end mt-1 ${ai.matched === false ? "text-danger fw-bold" : ai.matched === true ? "text-success" : "text-muted"}`}
+                          >
+                            <i className={`bi ${ai.matched === false ? "bi-exclamation-triangle-fill" : ai.matched === true ? "bi-patch-check-fill" : "bi-robot"} me-1`} />
+                            AI detected from {ai.source}: {pi.piRevealed ? ai.value : "••••••••"}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
 
                 {canEdit && (
@@ -800,6 +843,28 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                 </div>
               </div>
             </div>
+
+            {/* AI document validity check — warning only, see comment on
+                the docIssues fetch above. Moved below Personal Info/Company
+                Info (was previously up in the card header, above the name)
+                per explicit request to have it sit under the actual client
+                information instead of above it. */}
+            {docIssues.length > 0 && (
+              <div className="d-flex align-items-center flex-wrap gap-2 mt-3">
+                {docIssues.map((d) => (
+                  <Badge
+                    key={d.slot}
+                    bg="warning"
+                    text="dark"
+                    className="shadow-sm"
+                    title={d.validation_notes || "AI check flagged this document — see Cover Letter Assets / Alignment Check below"}
+                  >
+                    <i className="bi bi-file-earmark-excel-fill me-1"></i>
+                    {DOC_LABELS[d.slot] || d.slot}: {DOC_STATUS_LABELS[d.validation_status] || d.validation_status}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

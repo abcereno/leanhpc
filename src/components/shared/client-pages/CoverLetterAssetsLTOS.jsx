@@ -52,6 +52,7 @@ export default function CoverLetterAssetsLTOS({
   companyName,
   clientName,
   clientAddress,
+  clientDob,
   showAiResults = false,
 }) {
   const { addToast } = useToast();
@@ -218,7 +219,7 @@ export default function CoverLetterAssetsLTOS({
     if (!clientId) return;
     setCheckingKeys((prev) => ({ ...prev, [key]: true }));
     try {
-      const result = await validateDocument({ category: key, file, fileUrl, clientName, clientAddress });
+      const result = await validateDocument({ category: key, file, fileUrl, clientName, clientAddress, clientDob });
       if (!result.success) {
         if (showAiResults) addToast({ title: "Validity Check Failed", message: result.reasoning || "Could not check this document right now.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
         return;

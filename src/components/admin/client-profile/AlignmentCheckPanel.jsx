@@ -17,11 +17,12 @@
 // "warning-only, never a hard gate" precedent, same .select("id")-then-
 // check-row-count pattern for detecting a silent RLS no-op) rather than a
 // third parallel implementation.
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { Card, Badge, Button, Spinner, OverlayTrigger, Tooltip } from "react-bootstrap";
 import { supabase } from "../../../supabaseClient";
 import { validateDocument } from "../../../utils/validateDocument";
 import { useToast } from "../../shared/ui/ToastNotifier";
+import { useAlignmentDocs } from "../../../hooks/useAlignmentDocs";
 
 const BUCKET = "clients"; // ftc_report + letter files live here (LetterEditorModal.jsx's bucket) — NOT the separate "cover-letter-assets" bucket CoverLetterAssets.jsx uses for license/ssn/poa.
 
@@ -40,6 +41,12 @@ const CHECK_FIELDS = {
   ],
 };
 
+// Merged identity slot ('license'/'poa'/'authorization') -> the LTOS
+// category to send when re-checking a row that originated from
+// CoverLetterAssetsLTOS.jsx (see useAlignmentDocs.js's identitySlot()
+// and runCheck() below).
+const LTOS_CATEGORY_BY_SLOT = { license: "identity", poa: "address", authorization: "authorization" };
+
 function MatchBadge({ label, value }) {
   // true = match, false = mismatch, null/undefined = not checked or N/A
   const variant = value === true ? "success" : value === false ? "danger" : "secondary";
@@ -52,77 +59,54 @@ function MatchBadge({ label, value }) {
   );
 }
 
-export default function AlignmentCheckPanel({ clientId, refreshKey }) {
+export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh }) {
   const { addToast } = useToast();
-  const [loading, setLoading] = useState(true);
   const [client, setClient] = useState(null);
-  const [identityDocs, setIdentityDocs] = useState({ license: null, ssn: null, poa: null });
-  const [ftcReport, setFtcReport] = useState(null);
-  const [letters, setLetters] = useState([]);
   const [checkingId, setCheckingId] = useState(null); // row id (or 'license'/'ssn'/'poa') currently being checked
-  const [migrationMissing, setMigrationMissing] = useState(false);
 
-  const load = useCallback(async () => {
+  // Document fetch + legacy/LTOS merge is shared with ClientHeader.jsx's
+  // Personal Info "AI detected from ID" sub-lines — see useAlignmentDocs.js.
+  const { loading, migrationMissing, identityDocs, ftcReport, letters, reload } = useAlignmentDocs(clientId, refreshKey);
+
+  // Client record (name/ssn/address/email/phone) is only needed here, to
+  // pass as the comparison target when running a check — not part of the
+  // shared hook.
+  useEffect(() => {
     if (!clientId) return;
-    setLoading(true);
-    try {
+    let alive = true;
+    (async () => {
       const { data: c } = await supabase
         .from("clients")
-        .select("full_name, ssn, address, email, phone")
+        .select("full_name, ssn, address, email, phone, dob")
         .eq("id", clientId)
         .single();
-      setClient(c || null);
-
-      let { data: docs, error } = await supabase
-        .from("client_documents")
-        .select("id, file_name, file_url, doc_type, validation_status, validation_notes, validation_details, created_at")
-        .eq("client_id", clientId)
-        .in("doc_type", ["license", "ssn", "poa", "ftc_report", "letter"])
-        .order("created_at", { ascending: false });
-
-      if (error && /doc_type|validation_details/i.test(error.message || "")) {
-        setMigrationMissing(true);
-        setLoading(false);
-        return;
-      }
-      if (error) throw error;
-
-      const nextIdentity = { license: null, ssn: null, poa: null };
-      let latestFtc = null;
-      const letterRows = [];
-
-      (docs || []).forEach((row) => {
-        if (["license", "ssn", "poa"].includes(row.doc_type)) {
-          if (!nextIdentity[row.doc_type]) nextIdentity[row.doc_type] = row; // first-seen = most recent (already ordered desc)
-        } else if (row.doc_type === "ftc_report") {
-          if (!latestFtc) latestFtc = row;
-        } else if (row.doc_type === "letter") {
-          letterRows.push(row);
-        }
-      });
-
-      setIdentityDocs(nextIdentity);
-      setFtcReport(latestFtc);
-      setLetters(letterRows);
-    } catch (err) {
-      console.error("AlignmentCheckPanel load error:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [clientId]);
-
-  useEffect(() => { load(); }, [load, refreshKey]);
+      if (alive) setClient(c || null);
+    })();
+    return () => { alive = false; };
+  }, [clientId, refreshKey]);
 
   // Shared by every "Check Now" button below — `identityKind` is
-  // 'license'|'ssn'|'poa' for the fixed identity slots (uses docType,
-  // signed URL comes from cover-letter-assets bucket), or null for
-  // ftc_report/letter rows (uses reportCheck/category-less request keyed
-  // off doc_type, signed URL comes from the "clients" bucket).
+  // 'license'|'ssn'|'poa'|'authorization' for the identity slots (signed
+  // URL comes from cover-letter-assets bucket), or null for ftc_report/
+  // letter rows (reportCheck/docType keyed off doc_type, signed URL comes
+  // from the "clients" bucket).
+  //
+  // Identity slots need one more branch: a slot can be filled by either a
+  // legacy row (CoverLetterAssets.jsx, file_name === doc_type, checked via
+  // docType) or an LTOS row (CoverLetterAssetsLTOS.jsx, file_name in
+  // identity/address/authorization, checked via category — see
+  // useAlignmentDocs.js's identitySlot()). Re-checking must send the SAME
+  // request shape it was
+  // originally validated with, or the edge function runs the wrong
+  // prompt entirely (e.g. judging a passport against the legacy "driver's
+  // license" rules, or a lease against the utility-bill freshness rule).
   const runCheck = async (row, identityKind) => {
     if (!client) return;
     const checkKey = identityKind || row.id;
     setCheckingId(checkKey);
     try {
+      const isLtosOrigin = identityKind && ["identity", "address", "authorization"].includes(row?.file_name);
+
       const bucket = identityKind ? "cover-letter-assets" : BUCKET;
       const { data: signedData, error: signErr } = await supabase.storage
         .from(bucket)
@@ -131,7 +115,8 @@ export default function AlignmentCheckPanel({ clientId, refreshKey }) {
 
       const isFtc = !identityKind && row.doc_type === "ftc_report";
       const result = await validateDocument({
-        docType: identityKind || (row.doc_type === "letter" ? "letter" : undefined),
+        docType: identityKind && !isLtosOrigin ? identityKind : (!identityKind && row.doc_type === "letter" ? "letter" : undefined),
+        category: identityKind && isLtosOrigin ? LTOS_CATEGORY_BY_SLOT[identityKind] : undefined,
         reportCheck: isFtc ? "ftc" : undefined,
         fileUrl: signedData.signedUrl,
         clientName: client.full_name,
@@ -139,6 +124,7 @@ export default function AlignmentCheckPanel({ clientId, refreshKey }) {
         clientSsn: client.ssn,
         clientEmail: client.email,
         clientPhone: client.phone,
+        clientDob: client.dob,
       });
 
       if (!result.success) {
@@ -170,7 +156,16 @@ export default function AlignmentCheckPanel({ clientId, refreshKey }) {
       }
 
       addToast({ title: "Checked", message: result.reasoning || "Alignment check complete.", variant: "success", icon: "bi-check-circle" });
-      await load();
+      await reload();
+      // This panel's own useAlignmentDocs instance just refetched via
+      // reload() above, but ClientHeader.jsx's Personal Info "AI detected"
+      // sub-lines use a SEPARATE instance of the same hook — plain React
+      // state isn't shared across components, so without this that panel
+      // would keep showing the stale pre-check result until something else
+      // happened to bump the page-level refreshKey (e.g. a full reload).
+      // Bumping it here is what makes a check run from this panel actually
+      // show up in the header immediately.
+      onRefresh && onRefresh();
     } catch (err) {
       console.error("Alignment check error:", err);
       addToast({ title: "Check Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
@@ -190,10 +185,21 @@ export default function AlignmentCheckPanel({ clientId, refreshKey }) {
     );
   }
 
+  // "license" and "poa" slots merge rows from both upload flows (legacy
+  // CoverLetterAssets.jsx + LTOS CoverLetterAssetsLTOS.jsx — see load()'s
+  // identitySlot()), so their labels stay generic rather than assuming
+  // one specific document type. "authorization" only ever comes from the
+  // LTOS flow (no legacy equivalent).
   const identityRows = [
-    { kind: "license", label: "Driver's License", row: identityDocs.license, checks: identityDocs.license?.validation_details, fields: [{ key: "nameMatch", label: "Name" }] },
+    // DOB checks apply to every photo ID (license, state ID, passport);
+    // address only applies to license/state ID — a passport never prints
+    // one, so addressMatch will correctly come back null (shown as a
+    // gray "N/A" badge, not a mismatch) for those. See the edge
+    // function's isAddressDoc/isDobDoc.
+    { kind: "license", label: "Photo ID (License/Passport)", row: identityDocs.license, checks: identityDocs.license?.validation_details, fields: [{ key: "nameMatch", label: "Name" }, { key: "dobMatch", label: "DOB" }, { key: "addressMatch", label: "Address" }] },
     { kind: "ssn", label: "SSN Card", row: identityDocs.ssn, checks: identityDocs.ssn?.validation_details, fields: [{ key: "ssnMatch", label: "SSN" }, { key: "nameMatch", label: "Name" }] },
     { kind: "poa", label: "Proof of Address", row: identityDocs.poa, checks: identityDocs.poa?.validation_details, fields: [{ key: "nameMatch", label: "Name" }, { key: "addressMatch", label: "Address" }] },
+    { kind: "authorization", label: "Authorization (Limited POA)", row: identityDocs.authorization, checks: identityDocs.authorization?.validation_details, fields: [{ key: "nameMatch", label: "Name" }] },
   ];
 
   const anyMismatch = [
@@ -202,7 +208,7 @@ export default function AlignmentCheckPanel({ clientId, refreshKey }) {
     ...letters.map((l) => l.validation_details),
   ].some((c) => c && Object.values(c).some((v) => v === false));
 
-  const anyUnchecked = [identityDocs.license, identityDocs.ssn, identityDocs.poa, ftcReport, ...letters]
+  const anyUnchecked = [identityDocs.license, identityDocs.ssn, identityDocs.poa, identityDocs.authorization, ftcReport, ...letters]
     .some((row) => row && (!row.validation_status || row.validation_status === "pending"));
 
   const overall = anyMismatch
@@ -237,7 +243,7 @@ export default function AlignmentCheckPanel({ clientId, refreshKey }) {
                 fields={fields}
                 checking={checkingId === kind}
                 onCheck={() => runCheck(row, kind)}
-                missingText="Not uploaded yet."
+                missingText={kind === "authorization" ? "Not uploaded — optional (Limited POA), when applicable." : "Not uploaded yet."}
               />
             ))}
             <AlignmentRow

@@ -26,14 +26,15 @@ const SIGNED_URL_TTL = 60 * 60 * 24 * 30; // 30 days
 // the result is waiting for an admin the next time they open this same
 // client) — only the rendering and the result-revealing toast are gated,
 // never the underlying check.
-export default function CoverLetterAssets({ clientId, onChange, refreshKey, showAiResults = true }) {
+export default function CoverLetterAssets({ clientId, onChange, refreshKey, showAiResults = true, onRefresh }) {
   const [loading, setLoading] = useState(false);
   const [clientName, setClientName] = useState("Client");
-  // On file, for the Alignment Check (SSN match on the 'ssn' doc, address
-  // match on the 'poa' doc) — fetched alongside the name below rather than
-  // a second round trip.
+  // On file, for the Alignment Check (SSN match on the 'ssn' doc, DOB +
+  // address match on the 'license'/'poa' docs) — fetched alongside the
+  // name below rather than a second round trip.
   const [clientSsn, setClientSsn] = useState("");
   const [clientAddress, setClientAddress] = useState("");
+  const [clientDob, setClientDob] = useState("");
   
   const [assets, setAssets] = useState({
     license: { path: null, signedUrl: null, validation: null },
@@ -55,11 +56,12 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
     (async () => {
       setLoading(true);
       try {
-        const { data: cData } = await supabase.from("clients").select("full_name, ssn, address").eq("id", clientId).single();
+        const { data: cData } = await supabase.from("clients").select("full_name, ssn, address, dob").eq("id", clientId).single();
         if (cData && mounted.current) {
           setClientName(cData.full_name);
           setClientSsn(cData.ssn || "");
           setClientAddress(cData.address || "");
+          setClientDob(cData.dob || "");
         }
 
         let { data, error } = await supabase
@@ -270,7 +272,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
     if (!clientId) return;
     setCheckingKeys((prev) => ({ ...prev, [key]: true }));
     try {
-      const result = await validateDocument({ docType: key, file, fileUrl, clientName, clientAddress, clientSsn });
+      const result = await validateDocument({ docType: key, file, fileUrl, clientName, clientAddress, clientSsn, clientDob });
       if (!result.success) {
         if (showAiResults) addToast({ title: "Validity Check Failed", message: result.reasoning || "Could not check this document right now.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
         return;
@@ -338,6 +340,14 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
         variant: result.status === "valid" ? "success" : result.status === "needs_review" ? "info" : "warning",
         icon: badge?.icon ? `bi ${badge.icon}` : "bi-info-circle-fill",
       });
+
+      // ClientHeader.jsx's Personal Info "AI detected from ID" sub-lines
+      // read the same client_documents rows via their own useAlignmentDocs
+      // instance — a separate hook call, so it never sees this update on
+      // its own. Bumping the page-level refreshKey is what makes a check
+      // run from here actually show up in the header right away, same as
+      // AlignmentCheckPanel.jsx's runCheck does.
+      onRefresh && onRefresh();
     } catch (err) {
       console.error("Validation error:", err);
     } finally {

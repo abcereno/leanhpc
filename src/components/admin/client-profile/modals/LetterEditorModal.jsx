@@ -382,6 +382,11 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
           file_name: `Round ${round} - ${bureau} Cover Letter (In-House)`,
           file_url: storagePath,
           uploaded_by: userId,
+          // Alignment Check (AlignmentCheckPanel.jsx) filters on doc_type —
+          // without this, every letter generated after
+          // sql/add_document_alignment_check.sql's one-time backfill would
+          // have doc_type null and silently never show up there.
+          doc_type: "letter",
         });
         if (insertError) throw new Error(`${bureau}: ${insertError.message}`);
 

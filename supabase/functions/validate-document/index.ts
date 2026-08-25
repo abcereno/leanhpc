@@ -27,7 +27,8 @@
 // Input: { docType?: 'license'|'ssn'|'poa', category?: 'identity'|'address'|'authorization',
 //          reportCheck?: 'ftc', imageDataUrl: string, clientName?: string,
 //          clientAddress?: string, clientSsn?: string, clientEmail?: string,
-//          clientPhone?: string, today?: string (YYYY-MM-DD, defaults to
+//          clientPhone?: string, clientDob?: string (YYYY-MM-DD, same
+//          format as clients.dob), today?: string (YYYY-MM-DD, defaults to
 //          the function's own clock) }
 // imageDataUrl is always a base64 data: URL, never a Supabase signed
 // storage URL — the caller (src/utils/validateDocument.js) always
@@ -43,11 +44,20 @@
 // null for legacy docType requests, which never had this concept.
 // `checks` holds the structured alignment-check results (see above) —
 // shape depends on request type: docType/category requests get
-// {ssnMatch, nameMatch, addressMatch} (each true/false/null — null means
-// "not applicable to this doc type" or "nothing to compare against was
-// provided"); reportCheck:'ftc' requests get {reportNumber,
-// reportNumberValid, reportDate, hasHeaderFooter, nameMatch, emailMatch,
-// phoneMatch}. null on any response where nothing was checked.
+// {ssnMatch, nameMatch, addressMatch, dobMatch} (each true/false/null —
+// null means "not applicable to this doc type" or "nothing to compare
+// against was provided") PLUS the raw {extractedName, extractedAddress,
+// extractedSsn, extractedDob} each doc type actually reads (null for
+// fields that doc type doesn't extract), so a caller can show what the AI
+// read verbatim, not just a match badge. A license (docType) or
+// driver_license/state_id (category:'identity') extracts and checks name
+// + DOB + address; an SSN card extracts/checks name + SSN; a POA
+// document (or category:'address') extracts/checks name + address; a
+// passport (category:'identity', detectedType:'passport') extracts/checks
+// name + DOB only (no address — passports don't print a mailing address).
+// reportCheck:'ftc' requests get {reportNumber, reportNumberValid,
+// reportDate, hasHeaderFooter, nameMatch, emailMatch, phoneMatch}. null on
+// any response where nothing was checked.
 //
 // Warning-only by design (per product decision) — nothing downstream
 // reads this as a hard gate; see CoverLetterAssets.jsx / CoverLetterAssetsLTOS.jsx's
@@ -114,6 +124,18 @@ function ssnsMatch(extracted: string | null, onFile: string | null): boolean | n
   const b = (onFile || '').replace(/\D/g, '');
   if (a.length !== 9 || b.length !== 9) return null;
   return a === b;
+}
+
+// Both sides are expected as "YYYY-MM-DD" — extractedDob is asked for in
+// that exact format (see buildPrompt/buildCategoryPrompt), and
+// clients.dob is stored the same way (a `type="date"` form field). A
+// straight string comparison is safe as long as both actually parsed as
+// real dates; guards against a stray non-date string on either side
+// rather than trusting the format blindly.
+function dobsMatch(extracted: string | null, onFile: string | null): boolean | null {
+  const validDate = (s: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  if (!validDate(extracted) || !validDate(onFile)) return null;
+  return extracted === onFile;
 }
 
 function emailsMatch(extracted: string | null, onFile: string | null): boolean | null {
@@ -199,6 +221,8 @@ function buildPrompt(docType: string, today: string): string {
       ? `Also extract the full 9-digit Social Security Number printed on the card into "extractedSsn" (digits only, no dashes — null if unreadable), and the name printed on the card into "extractedName" (null if unreadable).`
       : docType === 'poa' || docType === 'letter'
       ? `Also extract the name into "extractedName" and the full mailing address into "extractedAddress" exactly as printed on the document (null for either if unreadable).`
+      : docType === 'license'
+      ? `Also extract: the full name into "extractedName"; the Date of Birth (labeled "DOB" or field "3", NOT the ISS/4a or EXP/4b dates you already read above) into "extractedDob" as "YYYY-MM-DD"; and the full mailing address printed on the card into "extractedAddress" exactly as printed. Use null for any of these that are unreadable.`
       : `Also extract the full name printed on the document into "extractedName" (null if unreadable).`;
 
   const typeSpecificRules =
@@ -239,8 +263,9 @@ Respond with strict JSON only, in this exact shape:
   "expiresAt": "YYYY-MM-DD" or null (the expiration date for a license, or the statement date for a POA document — null for SSN or if no date could be read),
   "issuedAt": "YYYY-MM-DD" or null (the issue date, ONLY for a license — helps cross-check you didn't mix it up with the expiration date; null otherwise),
   "extractedName": "<name exactly as printed>" or null,
-  "extractedAddress": "<address exactly as printed, POA only>" or null,
+  "extractedAddress": "<address exactly as printed, POA or license only>" or null,
   "extractedSsn": "<9 digits, no dashes, SSN card only>" or null,
+  "extractedDob": "YYYY-MM-DD" or null (Date of Birth, license only — do NOT confuse with issuedAt/expiresAt above),
   "reasoning": "<one or two sentences explaining the decision, including what you read on the document>"
 }
 
@@ -293,6 +318,8 @@ function buildCategoryPrompt(category: string, today: string): string {
   const extractionNote =
     category === 'address'
       ? `Also extract the name into "extractedName" and the full mailing address into "extractedAddress" exactly as printed on the document (null for either if unreadable).`
+      : category === 'identity'
+      ? `Also extract: the full name into "extractedName"; the Date of Birth (labeled "DOB" — NOT the ISS/4a or EXP/4b dates, or a passport's issue/expiration dates) into "extractedDob" as "YYYY-MM-DD"; and, ONLY if this is a driver_license or state_id (NOT a passport — US passports don't print a mailing address), the full mailing address into "extractedAddress" exactly as printed. Use null for any of these that are unreadable or not applicable (always null for extractedAddress on a passport).`
       : `Also extract the full name printed on the document into "extractedName" (null if unreadable).`;
 
   let categoryRules: string;
@@ -344,7 +371,8 @@ Respond with strict JSON only, in this exact shape:
   "expiresAt": "YYYY-MM-DD" or null (expiration/end date if one applies and was read, otherwise null),
   "issuedAt": "YYYY-MM-DD" or null (issue date, ONLY for identity documents — helps cross-check you didn't mix it up with the expiration date; null otherwise),
   "extractedName": "<name exactly as printed>" or null,
-  "extractedAddress": "<address exactly as printed, address category only>" or null,
+  "extractedAddress": "<address exactly as printed — address category, or identity category IF driver_license/state_id, only>" or null,
+  "extractedDob": "YYYY-MM-DD" or null (Date of Birth, identity category only — do NOT confuse with issuedAt/expiresAt above),
   "reasoning": "<one or two sentences explaining the decision, including what you read on the document>"
 }
 
@@ -399,7 +427,7 @@ serve(async (req) => {
   try {
     const {
       docType, category, reportCheck, imageDataUrl,
-      clientName, clientAddress, clientSsn, clientEmail, clientPhone, today
+      clientName, clientAddress, clientSsn, clientEmail, clientPhone, clientDob, today
     } = await req.json();
 
     // Exactly one of docType (legacy, admin CoverLetterAssets.jsx),
@@ -430,19 +458,30 @@ serve(async (req) => {
 
     const openai = new OpenAI({ apiKey: openaiKey });
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4-turbo',
+      // gpt-4o over gpt-4-turbo: stronger vision/OCR benchmarks (better at
+      // reading small printed fields like DOB/address on a phone-photo ID)
+      // and typically cheaper per request. Swapped 2026-08-25 per explicit
+      // request after a photocopied license produced weak extraction.
+      model: 'gpt-4o',
       messages: [
         {
           role: 'user',
           content: [
             { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: imageDataUrl } }
+            // detail:'high' forces the model to process the image at full
+            // resolution (multiple high-res tiles) instead of the default
+            // 'auto', which can silently downscale a large or dense image
+            // before reading it — the single biggest lever available here
+            // for OCR accuracy on small printed fields like a DOB or
+            // address line. Costs more tokens per request; worth it for a
+            // document a human is trusting a status/match result from.
+            { type: 'image_url', image_url: { url: imageDataUrl, detail: 'high' } }
           ]
         }
       ],
       response_format: { type: 'json_object' },
       temperature: 0,
-      max_tokens: 600
+      max_tokens: 700
     });
 
     const responseText = completion.choices?.[0]?.message?.content;
@@ -453,6 +492,7 @@ serve(async (req) => {
     const confidence = typeof parsed?.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : null;
     const expiresAt = /^\d{4}-\d{2}-\d{2}$/.test(parsed?.expiresAt || '') ? parsed.expiresAt : null;
     const issuedAt = /^\d{4}-\d{2}-\d{2}$/.test(parsed?.issuedAt || '') ? parsed.issuedAt : null;
+    const extractedDob = /^\d{4}-\d{2}-\d{2}$/.test(parsed?.extractedDob || '') ? parsed.extractedDob : null;
     let reasoning = typeof parsed?.reasoning === 'string' ? parsed.reasoning : '';
     const detectedType = isCategoryRequest
       ? (typeof parsed?.detectedType === 'string' && (CATEGORY_TYPES[category][parsed.detectedType] || parsed.detectedType === 'unknown')
@@ -549,12 +589,33 @@ serve(async (req) => {
       const extractedName = typeof parsed?.extractedName === 'string' ? parsed.extractedName : null;
       const extractedAddress = typeof parsed?.extractedAddress === 'string' ? parsed.extractedAddress : null;
       const extractedSsn = typeof parsed?.extractedSsn === 'string' ? parsed.extractedSsn : null;
-      const isAddressDoc = docType === 'poa' || docType === 'letter' || category === 'address';
+      // A driver's license/state ID prints a mailing address too, not just
+      // POA documents — added per product request so re-uploading a
+      // license also cross-checks address (and DOB, below), not just name.
+      // Passports are deliberately excluded: US passports don't print a
+      // mailing address, so isAddressDoc would otherwise pin a stray
+      // extractedAddress the model hallucinated to satisfy the schema.
+      const isAddressDoc = docType === 'poa' || docType === 'letter' || category === 'address'
+        || docType === 'license' || (category === 'identity' && (detectedType === 'driver_license' || detectedType === 'state_id'));
+      // DOB, unlike address, prints on every identity document type
+      // including passports.
+      const isDobDoc = docType === 'license' || category === 'identity';
 
       checks = {
         ssnMatch: docType === 'ssn' ? ssnsMatch(extractedSsn, clientSsn) : null,
         nameMatch: namesLikelyMatch(extractedName, clientName),
         addressMatch: isAddressDoc ? addressesLikelyMatch(extractedAddress, clientAddress) : null,
+        dobMatch: isDobDoc ? dobsMatch(extractedDob, clientDob) : null,
+        // Raw extracted values, not just the match booleans above — added
+        // so the UI can show "AI detected from ID: <value>" right next to
+        // what's on file (ClientHeader.jsx's Personal Info section), not
+        // just a match/mismatch badge. Scoped to only the doc types that
+        // actually extract each field (see extractionNote above), so a
+        // license row never carries a stray extractedAddress, etc.
+        extractedName,
+        extractedAddress: isAddressDoc ? extractedAddress : null,
+        extractedSsn: docType === 'ssn' ? extractedSsn : null,
+        extractedDob: isDobDoc ? extractedDob : null,
       };
     }
 

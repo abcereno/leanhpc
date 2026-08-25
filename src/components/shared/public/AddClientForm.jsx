@@ -439,6 +439,7 @@ export default function AddClientForm() {
               companyName={selectedCompany?.company_name}
               clientName={form.full_name.trim() ? form.full_name.toUpperCase() : undefined}
               clientAddress={form.address || undefined}
+              clientDob={form.dob || undefined}
               onChange={(urls) => setForm((f) => ({ ...f, ...urls }))}
             />
           </div>

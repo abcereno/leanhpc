@@ -13,9 +13,11 @@
 -- The public page has no auth.uid() at all (same as the rest of the token
 -- link flow — see sql/add_classic_report_token.sql), so the INSERT policy
 -- below authenticates the request the only way it can: the submitted row
--- must name a client_id + source_token pair that matches a live, unexpired
+-- must name a client_id + source_token pair that matches
 -- clients.classic_report_token — exactly the same check
 -- ClassicReportPage.jsx's own initial client lookup already does client-side.
+-- Classic Report tokens are permanent (no expiry) — see
+-- useClassicReportLink.js — so there's no expires_at check here either.
 --
 -- Safe to run once; idempotent (IF NOT EXISTS guards, DROP POLICY IF EXISTS
 -- before each CREATE POLICY).
@@ -39,9 +41,8 @@ create index if not exists idx_inquiry_flags_status on public.inquiry_flags (sta
 
 alter table public.inquiry_flags enable row level security;
 
--- Anyone holding a live, unexpired classic_report_token for this exact
--- client can queue a flag for it — same trust boundary as reading the report
--- itself.
+-- Anyone holding a valid classic_report_token for this exact client can
+-- queue a flag for it — same trust boundary as reading the report itself.
 drop policy if exists "valid classic report token can insert inquiry flags" on public.inquiry_flags;
 create policy "valid classic report token can insert inquiry flags"
   on public.inquiry_flags for insert
@@ -50,7 +51,6 @@ create policy "valid classic report token can insert inquiry flags"
       select 1 from public.clients c
       where c.id = inquiry_flags.client_id
         and c.classic_report_token = inquiry_flags.source_token
-        and c.classic_report_token_expires_at > now()
     )
   );
 

@@ -245,12 +245,12 @@ export default function ClientProfile({ overrideId }) {
               </Row>
               <Row>
                 <Col className="px-0 ps-lg-2">
-                  <CoverLetterAssets clientId={id} onChange={setLetterAssets} refreshKey={refreshKey} />
+                  <CoverLetterAssets clientId={id} onChange={setLetterAssets} refreshKey={refreshKey} onRefresh={handleRefresh} />
                 </Col>
               </Row>
               <Row>
                 <Col className="px-0 ps-lg-2">
-                  <AlignmentCheckPanel clientId={id} refreshKey={refreshKey} />
+                  <AlignmentCheckPanel clientId={id} refreshKey={refreshKey} onRefresh={handleRefresh} />
                 </Col>
               </Row>
               <Row>

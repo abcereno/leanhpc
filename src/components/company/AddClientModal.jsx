@@ -551,6 +551,7 @@ const prevShowRef = useRef(false);
                 companyName={companyName}
                 clientName={form.full_name.trim() ? form.full_name.toUpperCase() : undefined}
                 clientAddress={form.address || undefined}
+                clientDob={form.dob || undefined}
                 onChange={(urls) => setForm((f) => ({ ...f, ...urls }))}
               />
           </div>

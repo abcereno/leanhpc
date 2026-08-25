@@ -614,17 +614,18 @@ export default function ClassicReportPage() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const nowUTC = new Date().toISOString();
+      // Classic Report links are permanent — no expiry check. See
+      // useClassicReportLink.js, which no longer sets
+      // classic_report_token_expires_at on generation.
       const { data: client, error: clientErr } = await supabase
         .from("clients")
         .select("id, full_name")
         .eq("classic_report_token", token)
-        .gt("classic_report_token_expires_at", nowUTC)
         .maybeSingle();
 
       if (!alive) return;
       if (clientErr || !client) {
-        setError("This link is invalid or has expired. Please contact your representative for a new one.");
+        setError("This link is invalid. Please contact your representative for a new one.");
         setLoading(false);
         return;
       }

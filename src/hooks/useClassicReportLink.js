@@ -19,18 +19,21 @@ export function useClassicReportLink(clientId, refetch) {
     setGenerating(true);
     try {
       const token = uuidv4();
-      const expiresAt = new Date(Date.now() + 86_400_000).toISOString(); // 24h
 
+      // Classic Report links are permanent (no expiry) — see
+      // ClassicReportPage.jsx, which no longer checks
+      // classic_report_token_expires_at. That column is left in place
+      // unused rather than dropped, since it's nullable and harmless.
       const { error } = await supabase
         .from("clients")
-        .update({ classic_report_token: token, classic_report_token_expires_at: expiresAt, classic_report_token_viewed: false })
+        .update({ classic_report_token: token, classic_report_token_expires_at: null, classic_report_token_viewed: false })
         .eq("id", clientId);
       if (error) throw error;
 
       const url = `${window.location.origin}/classic-report/${token}`;
       try {
         await navigator.clipboard.writeText(url);
-        addToast({ title: "Link Copied", message: "Classic Report link copied to clipboard. Valid for 24 hours.", variant: "success", icon: "bi-clipboard-check" });
+        addToast({ title: "Link Copied", message: "Classic Report link copied to clipboard.", variant: "success", icon: "bi-clipboard-check" });
       } catch {
         addToast({ title: "Link Generated", message: url, variant: "success", icon: "bi-link-45deg", timeout: 15000 });
       }

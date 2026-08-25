@@ -62,9 +62,10 @@ export async function resolveToImageDataUrl(blob) {
 // CoverLetterAssets.jsx), `category` ('identity'|'address'|'authorization',
 // CoverLetterAssetsLTOS.jsx), or `reportCheck` ('ftc', the FTC Identity
 // Theft Report uploaded via LogChecklistItemModal.jsx) — never more than
-// one. `clientSsn`/`clientEmail`/`clientPhone` are only used by the doc
-// types that actually check them (ssn docType, and reportCheck:'ftc');
-// harmless to pass for others.
+// one. `clientSsn`/`clientEmail`/`clientPhone`/`clientDob` are only used
+// by the doc types that actually check them (ssn docType for clientSsn;
+// reportCheck:'ftc' for email/phone; license docType or category:'identity'
+// for clientDob); harmless to pass for others.
 //
 // On success: { success: true, status, confidence, expiresAt, issuedAt,
 // reasoning, detectedType, checks }. issuedAt is only populated for
@@ -82,7 +83,7 @@ export async function resolveToImageDataUrl(blob) {
 // reasoning } — callers should NOT persist a status in this case; leave
 // whatever validation_status is already on the row untouched rather than
 // overwriting a real prior result with an artifact of a failed retry.
-export async function validateDocument({ docType, category, reportCheck, file, fileUrl, clientName, clientAddress, clientSsn, clientEmail, clientPhone }) {
+export async function validateDocument({ docType, category, reportCheck, file, fileUrl, clientName, clientAddress, clientSsn, clientEmail, clientPhone, clientDob }) {
   try {
     const blob = file || (fileUrl ? await (await fetch(fileUrl)).blob() : null);
     if (!blob) throw new Error("No file provided to validate.");
@@ -98,7 +99,7 @@ export async function validateDocument({ docType, category, reportCheck, file, f
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ docType, category, reportCheck, imageDataUrl, clientName, clientAddress, clientSsn, clientEmail, clientPhone, today }),
+        body: JSON.stringify({ docType, category, reportCheck, imageDataUrl, clientName, clientAddress, clientSsn, clientEmail, clientPhone, clientDob, today }),
       }
     );
     const result = await res.json();
