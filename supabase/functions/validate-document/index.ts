@@ -228,10 +228,12 @@ function buildPrompt(docType: string, today: string): string {
   const typeSpecificRules =
     docType === 'license'
       ? `- US driver's licenses/state IDs print numbered fields — field "4a" is ISS (issue date) and field "4b" is EXP (expiration date). These sit right next to each other and are easy to swap. You MUST use the value next to "4b" / "EXP" for expiration — NEVER the value next to "4a" / "ISS", even if it visually appears first, is printed larger, or is closer to the top of that block of text. The issue date (4a/ISS) is always in the past and never means the document has expired; it is irrelevant to whether this ID is expired.
-- Locate the text label "EXP" (or "4b") specifically before reading any date. Read the date immediately next to THAT label. Do this before you look at "ISS"/"4a" at all, to avoid anchoring on the wrong field.
-- Cross-check: the expiration date must always be LATER than the issue date (typically by 4-8 years for a standard license, longer for some state IDs). If the date you're about to call "expiration" is earlier than — or only a couple years after — the issue date, you very likely have the two fields swapped. Re-read the card and use the correct field.
+- Many states also print a THIRD date labeled "REPLACED" (the date a duplicate/replacement card was issued — e.g. after a lost card or address change). This is NOT the expiration date, even though it's often the most recent-looking date on the card and sits close to ISS/EXP. It is very commonly in the past, which makes it easy to mistake for "expired" — ignore it entirely for the expiration decision. Only "EXP"/"4b" determines expiration.
+- Locate the text label "EXP" (or "4b") specifically before reading any date. Read the date immediately next to THAT label. Do this before you look at "ISS"/"4a" or "REPLACED" at all, to avoid anchoring on the wrong field.
+- Cross-check: the expiration date must always be LATER than the issue date (typically by 4-8 years for a standard license, longer for some state IDs). If the date you're about to call "expiration" is earlier than — or only a couple years after — the issue date, you very likely have the wrong field (ISS or REPLACED instead of EXP). Re-read the card and use the correct field.
 - Extract BOTH dates: the field you determined is EXP goes in "expiresAt", and the field you determined is ISS goes in "issuedAt". Do not leave "issuedAt" blank if it's printed on the card — it's required for a license so this can be double-checked.
-- Read every digit of each date individually rather than pattern-matching the whole number at once — printed digits like 3/8, 0/6/8/9, and 1/7 are easy to confuse at a glance, especially in the year. If any single digit is blurry, glared, or you're not fully certain of it, treat the date as unreadable for that digit rather than guessing — use "needs_review" instead of a confident but possibly wrong date.
+- Read every digit of each date individually rather than pattern-matching the whole number at once — printed digits like 3/8, 0/6/8/9, and 1/7 are easy to confuse at a glance, especially in the year. State IDs commonly print a diagonal seal, hologram, or watermark pattern that crosses directly through the ISS/EXP text block — if that pattern overlaps any digit of the EXP year, treat that digit as uncertain rather than guessing, even if a plausible-looking digit is visible through it.
+- Before settling on the EXP year, state all 4 digits of it individually in your reasoning (e.g. "EXP year digits: 2, 0, 2, 8"), and separately confirm the EXP-minus-ISS gap in years. If you cannot state all 4 digits with genuine confidence, use "needs_review" instead of a confident but possibly wrong date — a wrong "valid"/"expired" call is worse than asking a human to double check one card.
 - Today's date is ${today}. If the (correctly identified, field-4b) expiration date is before today, status must be "expired".
 - If the image is not actually a license/state ID, or is too illegible to read the expiration date, status must be "invalid" (not readable at all) or "needs_review" (readable but you're not fully confident).
 - Otherwise, if it's clearly a valid, unexpired license, status is "valid".`
@@ -329,10 +331,12 @@ ${typeList}
 
 - First determine which of the above it is (set "detectedType" to the matching key, or "unknown" if you can't tell or it's none of these).
 - Driver's licenses/state IDs print numbered fields — field "4a" is ISS (issue date) and field "4b" is EXP (expiration date). These sit right next to each other and are easy to swap. You MUST use the value next to "4b" / "EXP" for expiration — NEVER the value next to "4a" / "ISS", even if it visually appears first, is printed larger, or is closer to the top of that block of text. The issue date (4a/ISS) is always in the past and never means the document has expired; it is irrelevant to whether this ID is expired.
-- Locate the text label "EXP" (or "4b") specifically before reading any date. Read the date immediately next to THAT label. Do this before you look at "ISS"/"4a" at all, to avoid anchoring on the wrong field. (Passports print only one expiration date, no issue-date mix-up risk there.)
-- Cross-check (licenses/state IDs only): the expiration date must always be LATER than the issue date, typically by 4-8 years for a standard license, longer for some state IDs. If the date you're about to call "expiration" is earlier than — or only a couple years after — the issue date, you very likely have the two fields swapped. Re-read the card and use the correct field.
+- Many states also print a THIRD date labeled "REPLACED" (the date a duplicate/replacement card was issued — e.g. after a lost card or address change). This is NOT the expiration date, even though it's often the most recent-looking date on the card and sits close to ISS/EXP. It is very commonly in the past, which makes it easy to mistake for "expired" — ignore it entirely for the expiration decision. Only "EXP"/"4b" determines expiration.
+- Locate the text label "EXP" (or "4b") specifically before reading any date. Read the date immediately next to THAT label. Do this before you look at "ISS"/"4a" or "REPLACED" at all, to avoid anchoring on the wrong field. (Passports print only one expiration date, no issue-date mix-up risk there.)
+- Cross-check (licenses/state IDs only): the expiration date must always be LATER than the issue date, typically by 4-8 years for a standard license, longer for some state IDs. If the date you're about to call "expiration" is earlier than — or only a couple years after — the issue date, you very likely have the wrong field (ISS or REPLACED instead of EXP). Re-read the card and use the correct field.
 - Extract BOTH dates for licenses/state IDs: the field you determined is EXP goes in "expiresAt", and the field you determined is ISS goes in "issuedAt". Do not leave "issuedAt" blank if it's printed on the card — it's required so this can be double-checked. (Not applicable to passports, which don't print an issue date.)
-- Read every digit of each date individually rather than pattern-matching the whole number at once — printed digits like 3/8, 0/6/8/9, and 1/7 are easy to confuse at a glance, especially in the year. If any single digit is blurry, glared, or you're not fully certain of it, treat the date as unreadable for that digit rather than guessing — use "needs_review" instead of a confident but possibly wrong date.
+- Read every digit of each date individually rather than pattern-matching the whole number at once — printed digits like 3/8, 0/6/8/9, and 1/7 are easy to confuse at a glance, especially in the year. State IDs commonly print a diagonal seal, hologram, or watermark pattern that crosses directly through the ISS/EXP text block — if that pattern overlaps any digit of the EXP year, treat that digit as uncertain rather than guessing, even if a plausible-looking digit is visible through it.
+- Before settling on the EXP year (licenses/state IDs/passports), state all 4 digits of it individually in your reasoning (e.g. "EXP year digits: 2, 0, 2, 8"). If you cannot state all 4 digits with genuine confidence, use "needs_review" instead of a confident but possibly wrong date — a wrong "valid"/"expired" call is worse than asking a human to double check one card.
 - Today's date is ${today}. If the (correctly identified, field-4b for licenses/state IDs) expiration date is before today, status must be "expired" — photo ID must be current, never expired.
 - If the image is not actually one of the listed identity documents, or is too illegible to read, status must be "invalid" (not readable / wrong document) or "needs_review" (readable but you're not fully confident).
 - Otherwise, if it's clearly a valid, unexpired document from the list, status is "valid".`;
@@ -601,6 +605,23 @@ serve(async (req) => {
       // including passports.
       const isDobDoc = docType === 'license' || category === 'identity';
 
+      // POA / qualifying address-category documents don't have an
+      // "expiration date" the way a license does — the model's expiresAt
+      // field is repurposed there to mean "statement/issue date printed on
+      // the document" (see buildPrompt/buildCategoryPrompt's own field
+      // comment for expiresAt). Persisted under its own name so the UI
+      // doesn't have to guess which meaning "expiresAt" has for a given
+      // row, with the day-count computed here in code rather than trusted
+      // to the model's own arithmetic (same reasoning as the license
+      // valid/expired auto-correction above). Lease/deed excluded — those
+      // don't use this same "recent vs. stale" freshness rule.
+      const STATEMENT_DATE_TYPES = ['utility_bill', 'bank_statement', 'mortgage_statement', 'insurance_statement', 'government_mail'];
+      const isStatementDateDoc = docType === 'poa' || (category === 'address' && STATEMENT_DATE_TYPES.includes(detectedType || ''));
+      const statementDate = isStatementDateDoc ? expiresAt : null;
+      const statementAgeDays = statementDate
+        ? Math.round((new Date(effectiveToday).getTime() - new Date(statementDate).getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+
       checks = {
         ssnMatch: docType === 'ssn' ? ssnsMatch(extractedSsn, clientSsn) : null,
         nameMatch: namesLikelyMatch(extractedName, clientName),
@@ -616,6 +637,19 @@ serve(async (req) => {
         extractedAddress: isAddressDoc ? extractedAddress : null,
         extractedSsn: docType === 'ssn' ? extractedSsn : null,
         extractedDob: isDobDoc ? extractedDob : null,
+        // expiresAt/issuedAt were already computed above (and are what the
+        // valid/expired decision itself was based on) but were previously
+        // only returned at the top level of the response, never persisted —
+        // AlignmentCheckPanel.jsx's runCheck() only saves `checks` into
+        // validation_details, so admins had no way to see what date the AI
+        // actually read off the card without asking for a code-level debug.
+        // Duplicating them in here (scoped to expiration-bearing doc types
+        // only) is what makes "AI detected: Expires X" visible on the row.
+        expiresAt: isExpirationDoc ? expiresAt : null,
+        issuedAt: isExpirationDoc ? issuedAt : null,
+        statementDate,
+        statementAgeDays,
+        statementIsRecent: statementAgeDays != null ? statementAgeDays <= POA_MAX_AGE_DAYS : null,
       };
     }
 

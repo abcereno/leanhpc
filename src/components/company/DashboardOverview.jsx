@@ -113,8 +113,8 @@ const DashboardOverview = ({ refreshKey, pipelineData, handleOpenSummary }) => {
   const STAGE_LABELS = {
     awaitingPayment: { label: "Awaiting Payment", color: theme.unpaid },
     awaitingDocs: { label: "Awaiting Documents", color: theme.docs },
-    pendingReview: { label: "Pending Review", color: theme.review },
-    processing: { label: "Processing Active", color: theme.processing },
+    pendingReview: { label: "In Process", color: theme.review },
+    processing: { label: "Almost Completed", color: theme.processing },
     completed: { label: "Fully Completed", color: theme.success }
   };
 
@@ -178,7 +178,7 @@ const DashboardOverview = ({ refreshKey, pipelineData, handleOpenSummary }) => {
                     <i className="bi bi-search fs-5" style={{ color: theme.review }}></i>
                 </div>
                 <h3 className="fw-bolder text-white mb-0 lh-1">{opStats.pendingReview}</h3>
-                <span className="small fw-bold text-uppercase" style={{ color: theme.review, fontSize: '0.65rem' }}>Pending Review</span>
+                <span className="small fw-bold text-uppercase" style={{ color: theme.review, fontSize: '0.65rem' }}>In Process</span>
                 <i className="bi bi-chevron-right position-absolute top-50 translate-middle-y fs-4" style={{ right: '-12px', color: theme.border, zIndex: 2, background: activeStage === 'pendingReview' ? '#171c32' : theme.bgCard }}></i>
             </div>
 
@@ -192,7 +192,7 @@ const DashboardOverview = ({ refreshKey, pipelineData, handleOpenSummary }) => {
                     <i className="bi bi-gear-wide-connected fs-5" style={{ color: theme.processing }}></i>
                 </div>
                 <h3 className="fw-bolder text-white mb-0 lh-1">{opStats.processing}</h3>
-                <span className="small fw-bold text-uppercase" style={{ color: theme.processing, fontSize: '0.65rem' }}>Processing Active</span>
+                <span className="small fw-bold text-uppercase" style={{ color: theme.processing, fontSize: '0.65rem' }}>Almost Completed</span>
                 <i className="bi bi-chevron-right position-absolute top-50 translate-middle-y fs-4" style={{ right: '-12px', color: theme.border, zIndex: 2, background: activeStage === 'processing' ? '#111b33' : theme.bgCard }}></i>
             </div>
 

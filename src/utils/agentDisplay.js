@@ -23,25 +23,34 @@ export function standardizeAgentName(name) {
   return name.trim();
 }
 
-/** Builds an `{ [company_user_profiles.id]: full_name }` map for a
- * company's agents — the shared "agent_id -> display name" lookup used
- * wherever a client list needs to resolve agent_id into a name. */
-export async function fetchAgentLookupMap(supabase, companyId) {
-  const map = {};
-  if (!companyId) return map;
+/** Fetches a company's roster of agents as plain { id, full_name } rows —
+ * the shape a "Reassign agent" <select> needs. Shared so the client-list
+ * screens and the new agent-assignment picker query company_user_profiles
+ * the exact same way (same role filter) instead of each hand-rolling it. */
+export async function fetchCompanyAgents(supabase, companyId) {
+  if (!companyId) return [];
 
   const { data, error } = await supabase
     .from("company_user_profiles")
     .select("id, full_name")
     .eq("company_id", companyId)
-    .in("role", ["agent", "company_agent"]);
+    .in("role", ["agent", "company_agent"])
+    .order("full_name", { ascending: true });
 
   if (error) {
     console.warn("Could not fetch agents list:", error.message);
-    return map;
+    return [];
   }
+  return data || [];
+}
 
-  (data || []).forEach((a) => { map[a.id] = a.full_name; });
+/** Builds an `{ [company_user_profiles.id]: full_name }` map for a
+ * company's agents — the shared "agent_id -> display name" lookup used
+ * wherever a client list needs to resolve agent_id into a name. */
+export async function fetchAgentLookupMap(supabase, companyId) {
+  const agents = await fetchCompanyAgents(supabase, companyId);
+  const map = {};
+  agents.forEach((a) => { map[a.id] = a.full_name; });
   return map;
 }
 

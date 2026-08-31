@@ -5,6 +5,7 @@
 // they get attached as extra pages to every generated letter PDF — see
 // src/utils/letterPdf.js) can render identical labels/badges without a
 // second copy drifting out of sync with the first.
+import { formatYmd } from "./dateHelpers";
 export const ASSET_KEYS = ["license", "ssn", "poa"];
 export const ASSET_LABELS = { license: "Driver's License", ssn: "Social Security Card", poa: "Proof of Address" };
 
@@ -55,3 +56,36 @@ export const LTOS_TYPE_LABELS = {
   limited_poa: "Limited Power of Attorney",
   unknown: "Unrecognized Document",
 };
+
+// Builds the "AI detected: ..." lines shown under a document — a plain-
+// language summary of exactly what the AI extracted, so an admin can spot
+// a misread immediately instead of hovering a tooltip or asking someone to
+// check. `kind` is 'license'/'ssn'/'poa' (CoverLetterAssets.jsx's ASSET_KEYS,
+// also what AlignmentCheckPanel.jsx's identityRows use); `checks` is the
+// row's validation_details jsonb — the same object the edge function
+// returns as `checks` (supabase/functions/validate-document/index.ts).
+// Shared here (not duplicated per component) since both surfaces show the
+// same three document types with the same extracted fields.
+export function buildAiDetectedLines(kind, checks) {
+  if (!checks) return [];
+  const lines = [];
+
+  if (kind === "license") {
+    if (checks.extractedName) lines.push(checks.extractedName);
+    if (checks.extractedAddress) lines.push(checks.extractedAddress);
+    if (checks.expiresAt) {
+      lines.push(`Expires ${formatYmd(checks.expiresAt)}${checks.issuedAt ? ` (Issued ${formatYmd(checks.issuedAt)})` : ""}`);
+    }
+  } else if (kind === "ssn") {
+    if (checks.extractedName) lines.push(checks.extractedName);
+  } else if (kind === "poa") {
+    // POA documents don't expire — status is based on how old the
+    // statement/bill date is (60-day window), not an expiration date.
+    if (checks.statementDate) {
+      const ageLabel = checks.statementIsRecent === true ? "Recent" : checks.statementIsRecent === false ? "Older than 60 days" : null;
+      lines.push([ageLabel, `dated ${formatYmd(checks.statementDate)}`].filter(Boolean).join(" — "));
+    }
+  }
+
+  return lines;
+}

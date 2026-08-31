@@ -316,7 +316,6 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
     } finally {
       setLoadingClient(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, byBureau, addToast, compileForBureau, loadAssetDocs, letterType]);
 
   useEffect(() => {

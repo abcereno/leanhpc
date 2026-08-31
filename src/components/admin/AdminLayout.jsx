@@ -9,6 +9,7 @@ import AppFooter from "../shared/layout/AppFooter";
 import InquiryLoader from "../shared/ui/InquiryLoader";
 import AdminNotificationWatcher from "./AdminNotificationWatcher";
 import ClientSubmissionListener from "./ClientSubmissionListener";
+import SupportChatPopups from "./SupportChatPopups";
 import AdminSidebar from "./AdminSidebar";
 import AdminNavbar from "./AdminNavbar"; 
 
@@ -31,6 +32,7 @@ export default function AdminLayout() {
           mount site for the incident that prompted this. */}
       <AdminNotificationWatcher />
       <ClientSubmissionListener />
+      <SupportChatPopups />
       <ToastContainer position="top-end" className="p-3" style={{ zIndex: 9999, position: 'fixed' }}>
         {notifications.map((note) => (
           <Toast key={note.id} onClose={() => removeNotification(note.id)} bg={note.type === 'success' ? 'success' : 'info'} autohide delay={5000}>

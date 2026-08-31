@@ -110,6 +110,9 @@ export default function AdminSidebar({ isSidebarOpen, setIsSidebarOpen }) {
                 {canSeeSupportConsole && (
                   <NavItem path="/support-console" icon="bi-life-preserver" label="Support Console" iconClass="text-info" />
                 )}
+                {canSeeSupportConsole && (
+                  <NavItem path="/support-inbox" icon="bi-chat-dots-fill" label="Support Chat" iconClass="text-info" />
+                )}
                 {canSeeCounting && (
                   <NavItem path="/identify-inquiries" icon="bi-123" label="Count Inquiries" />
                 )}

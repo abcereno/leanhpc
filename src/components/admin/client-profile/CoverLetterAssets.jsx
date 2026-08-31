@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import { Dropdown } from "react-bootstrap";
 import { supabase } from "../../../supabaseClient";
 import useLogger from "../../../hooks/useLogger";
 import { useToast } from "../../shared/ui/ToastNotifier";
+import { useAuth } from "../../../context/AuthContext";
 import { validateDocument } from "../../../utils/validateDocument";
-import { ASSET_KEYS as KEYS, ASSET_LABELS, VALIDATION_BADGES } from "../../../utils/documentAssetLabels";
+import { ASSET_KEYS as KEYS, ASSET_LABELS, VALIDATION_BADGES, buildAiDetectedLines } from "../../../utils/documentAssetLabels";
+import { overrideDocumentValidation, OVERRIDE_STATUS_LABELS } from "../../../utils/overrideDocumentValidation";
 import useDropzone from "../../../hooks/useDropzone";
 
 const BUCKET = "cover-letter-assets";     // private bucket recommended
@@ -42,9 +45,11 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
     poa: { path: null, signedUrl: null, validation: null },
   });
   const [checkingKeys, setCheckingKeys] = useState({});
+  const [overridingKeys, setOverridingKeys] = useState({});
 
   const logAction = useLogger();
   const { addToast } = useToast();
+  const { fullName: adminName } = useAuth();
   const mounted = useRef(true);
 
   const canUse = useMemo(() => !!clientId, [clientId]);
@@ -111,6 +116,11 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
                     status: row.validation_status,
                     reasoning: row.validation_notes,
                     expiresAt: row.expires_at,
+                    // issued_at has no dedicated column (unlike expires_at)
+                    // — it only ever lives inside validation_details, which
+                    // the edge function now populates for expiration-bearing
+                    // doc types (see supabase/functions/validate-document).
+                    issuedAt: row.validation_details?.issuedAt || null,
                     confidence: row.ai_confidence,
                     checks: row.validation_details || null,
                   }
@@ -305,7 +315,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
       if (mounted.current) {
         setAssets((prev) => ({
           ...prev,
-          [key]: { ...prev[key], validation: { status: result.status, reasoning: result.reasoning, expiresAt: result.expiresAt, confidence: result.confidence, checks: result.checks || null } },
+          [key]: { ...prev[key], validation: { status: result.status, reasoning: result.reasoning, expiresAt: result.expiresAt, issuedAt: result.issuedAt, confidence: result.confidence, checks: result.checks || null } },
         }));
       }
 
@@ -359,6 +369,47 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
     const fileUrl = assets[key]?.signedUrl;
     if (!fileUrl) return;
     await runValidation(key, null, fileUrl);
+  }
+
+  // Manual override — a human looked at the document and is overruling
+  // whatever the AI decided (see utils/overrideDocumentValidation.js for
+  // why this exists). Same underlying write AlignmentCheckPanel.jsx's
+  // Override dropdown uses, just matched by client_id+file_name here
+  // since this component's `assets` state never carries a row id.
+  async function handleOverride(key, status) {
+    if (!clientId || !assets[key]?.path) return;
+    const label = OVERRIDE_STATUS_LABELS[status] || status;
+    if (!window.confirm(`Mark this document as "${label}"? This overrides the AI result and will be recorded as a manual override.`)) return;
+
+    setOverridingKeys((prev) => ({ ...prev, [key]: true }));
+    try {
+      const result = await overrideDocumentValidation({
+        clientId,
+        fileName: key,
+        status,
+        adminName,
+        previousNotes: assets[key]?.validation?.reasoning,
+        previousDetails: assets[key]?.validation?.checks,
+      });
+
+      if (!result.success) {
+        addToast({ title: "Override Didn't Save", message: result.error, variant: "danger", icon: "bi-exclamation-octagon-fill", timeout: 12000 });
+        return;
+      }
+
+      if (mounted.current) {
+        setAssets((prev) => ({
+          ...prev,
+          [key]: { ...prev[key], validation: { status, reasoning: result.notes, confidence: null, checks: result.validation_details } },
+        }));
+      }
+      addToast({ title: "Overridden", message: `Marked "${result.label}" manually.`, variant: "success", icon: "bi-person-check-fill" });
+    } catch (err) {
+      console.error("Manual override error:", err);
+      addToast({ title: "Override Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+    } finally {
+      if (mounted.current) setOverridingKeys((prev) => ({ ...prev, [key]: false }));
+    }
   }
 
   async function handleRemove(key) {
@@ -425,6 +476,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
         {!canUse && <div className="alert alert-warning w-100">Client ID missing.</div>}
 
         <AssetRow
+          kind="license"
           label="Driver’s License"
           record={assets.license}
           placeholder="Upload ID Image"
@@ -433,12 +485,15 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
           onCopy={() => copyUrl(assets.license.signedUrl)}
           onCheckValidity={() => handleCheckValidity("license")}
           checking={!!checkingKeys.license}
+          onOverride={(status) => handleOverride("license", status)}
+          overriding={!!overridingKeys.license}
           showAiResults={showAiResults}
         />
 
         <div className="vr border-secondary opacity-25"></div>
 
         <AssetRow
+          kind="ssn"
           label="Social Security Card"
           record={assets.ssn}
           placeholder="Upload SSN Image"
@@ -447,12 +502,15 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
           onCopy={() => copyUrl(assets.ssn.signedUrl)}
           onCheckValidity={() => handleCheckValidity("ssn")}
           checking={!!checkingKeys.ssn}
+          onOverride={(status) => handleOverride("ssn", status)}
+          overriding={!!overridingKeys.ssn}
           showAiResults={showAiResults}
         />
 
         <div className="vr border-secondary opacity-25"></div>
 
         <AssetRow
+          kind="poa"
           label="Proof of Address"
           record={assets.poa}
           placeholder="Utility Bill / Bank Stmt"
@@ -461,6 +519,8 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
           onCopy={() => copyUrl(assets.poa.signedUrl)}
           onCheckValidity={() => handleCheckValidity("poa")}
           checking={!!checkingKeys.poa}
+          onOverride={(status) => handleOverride("poa", status)}
+          overriding={!!overridingKeys.poa}
           showAiResults={showAiResults}
         />
       </div>
@@ -468,9 +528,11 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
   );
 }
 
-function AssetRow({ label, record, placeholder, onUpload, onRemove, onCopy, onCheckValidity, checking, showAiResults = true }) {
+function AssetRow({ kind, label, record, placeholder, onUpload, onRemove, onCheckValidity, checking, onOverride, overriding, showAiResults = true }) {
   const isImage = record.signedUrl && /\.(png|jpe?g|webp|gif)(\?|$)/i.test(record.signedUrl);
   const badge = record.validation ? VALIDATION_BADGES[record.validation.status] : null;
+  const aiDetectedLines = buildAiDetectedLines(kind, record.validation?.checks);
+  const isOverridden = !!record.validation?.checks?.manualOverride;
 
   // Same single-file drop target as CoverLetterAssetsLTOS.jsx's AssetTile —
   // reused as-is (see useDropzone.js's own header) rather than growing a
@@ -503,6 +565,7 @@ function AssetRow({ label, record, placeholder, onUpload, onRemove, onCopy, onCh
               title={[record.validation.reasoning, record.validation.expiresAt ? `Date on file: ${record.validation.expiresAt}` : null].filter(Boolean).join(" — ")}
             >
               <i className={`bi ${badge.icon} me-1`}></i>{badge.label}
+              {isOverridden && <span className="badge bg-info text-dark fw-normal ms-1" style={{ fontSize: "0.6rem" }}>manual</span>}
             </span>
           ) : record.path ? (
             <span className="small text-muted opacity-75">Not checked</span>
@@ -546,6 +609,18 @@ function AssetRow({ label, record, placeholder, onUpload, onRemove, onCopy, onCh
         )}
       </div>
 
+      {showAiResults && aiDetectedLines.length > 0 && (
+        <div
+          className="text-muted small text-center mt-1 px-2 py-1 rounded"
+          style={{ maxWidth: 150, lineHeight: 1.4, background: "rgba(148, 163, 184, 0.08)", border: "1px solid rgba(148, 163, 184, 0.15)" }}
+        >
+          <div className="fw-semibold text-uppercase" style={{ fontSize: "0.62rem", letterSpacing: "0.4px", opacity: 0.85 }}>
+            <i className="bi bi-robot me-1" />AI Detected
+          </div>
+          {aiDetectedLines.map((line, i) => <div key={i}>{line}</div>)}
+        </div>
+      )}
+
       <div className="d-flex gap-2 mt-2">
         <label className="btn btn-sm btn-primary mb-0" title="Upload New File">
           <i className="bi bi-upload"></i>
@@ -580,12 +655,35 @@ function AssetRow({ label, record, placeholder, onUpload, onRemove, onCopy, onCh
         {showAiResults && (
           <button
             className="btn btn-sm btn-outline-secondary"
+            style={{ color: "var(--primary-blue, #0EA5E9)", borderColor: "var(--primary-blue, #0EA5E9)" }}
             onClick={onCheckValidity}
             disabled={!record.path || checking}
             title="Check Validity (AI)"
           >
             {checking ? <span className="spinner-border spinner-border-sm"></span> : <i className="bi bi-shield-check"></i>}
           </button>
+        )}
+
+        {showAiResults && onOverride && (
+          <Dropdown align="end">
+            <Dropdown.Toggle
+              size="sm"
+              variant="outline-dark"
+              style={{ color: "var(--accent-gold, #F59E0B)", borderColor: "var(--accent-gold, #F59E0B)" }}
+              disabled={!record.path || overriding}
+              title="Manually Validate"
+              id={`override-toggle-${kind}`}
+            >
+              {overriding ? <span className="spinner-border spinner-border-sm"></span> : <i className="bi bi-person-check-fill"></i>}
+            </Dropdown.Toggle>
+            <Dropdown.Menu>
+              <Dropdown.Header>Manually validate</Dropdown.Header>
+              <Dropdown.Item onClick={() => onOverride("valid")}><i className="bi bi-check-circle-fill text-success me-2" />Mark Valid</Dropdown.Item>
+              <Dropdown.Item onClick={() => onOverride("expired")}><i className="bi bi-clock-history text-warning me-2" />Mark Expired</Dropdown.Item>
+              <Dropdown.Item onClick={() => onOverride("invalid")}><i className="bi bi-x-circle-fill text-danger me-2" />Mark Invalid</Dropdown.Item>
+              <Dropdown.Item onClick={() => onOverride("needs_review")}><i className="bi bi-question-circle-fill text-warning me-2" />Mark Needs Review</Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown>
         )}
       </div>
     </div>

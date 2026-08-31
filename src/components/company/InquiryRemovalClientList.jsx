@@ -6,23 +6,16 @@ import { Table, Button, Spinner, Alert, Badge, ProgressBar, Form, InputGroup, Ro
 // [NEW] Import Summary Modal
 import ClientSummaryModal from '../admin/client-profile/modals/ClientSummaryModal';
 import { resolveServiceId, serviceLabel } from '../../utils/services';
-
-// --- HELPER: Standardize empty/unassigned agents ---
-const standardizeAgentName = (name) => {
-  if (!name) return "N/A";
-  const lowerName = name.trim().toLowerCase();
-  if (["n/a", "na", "-", "—", "unassigned", "null", ""].includes(lowerName)) {
-    return "N/A";
-  }
-  return name.trim();
-};
+import { standardizeAgentName, fetchCompanyAgents } from '../../utils/agentDisplay';
+import AgentAssignSelect from './AgentAssignSelect';
 
 export default function InquiryRemovalClientList({ refreshKey, onCheckEligibility }) {
-  const { companyId, isAgent, user, loading: companyLoading, error: companyError } = useCompanyAuth();
+  const { companyId, isAgent, isCompanyAdmin, user, loading: companyLoading, error: companyError } = useCompanyAuth();
   const navigate = useNavigate();
-  
+
   const [clients, setClients] = useState([]);
-  const [dbAgents, setDbAgents] = useState([]); // Store official company agents
+  const [dbAgents, setDbAgents] = useState([]); // Store official company agents (names, for the filter dropdown)
+  const [agentsList, setAgentsList] = useState([]); // Same roster as { id, full_name }, for the assign picker
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -43,6 +36,17 @@ export default function InquiryRemovalClientList({ refreshKey, onCheckEligibilit
   const handleCloseSummary = () => {
     setShowSummary(false);
     setSummaryClient(null);
+  };
+
+  // Applied after AgentAssignSelect writes the new agent_id, so the row
+  // reflects the reassignment immediately without a full refetch.
+  const handleAgentAssigned = (clientId, newAgentId) => {
+    const newName = agentsList.find(a => a.id === newAgentId)?.full_name || null;
+    setClients(prev => prev.map(c => (
+      c.id === clientId
+        ? { ...c, agent_id: newAgentId, agent: null, agentName: standardizeAgentName(newName || "N/A") }
+        : c
+    )));
   };
 
   useEffect(() => {
@@ -83,17 +87,10 @@ export default function InquiryRemovalClientList({ refreshKey, onCheckEligibilit
           return q.order('created_at', { ascending: false });
         };
 
-        // 2. FETCH OFFICIAL AGENTS LIST
-        const agentQuery = supabase
-          .from('company_user_profiles')
-          .select('id, full_name')
-          .eq('company_id', companyId)
-          .in('role', ['agent', 'company_agent']);
-
-        // Run both queries simultaneously
-        let [clientRes, agentRes] = await Promise.all([
+        // 2. FETCH OFFICIAL AGENTS LIST + 1. CLIENTS, in parallel
+        let [clientRes, agentRoster] = await Promise.all([
             buildClientQuery(CLIENT_FIELDS),
-            agentQuery
+            fetchCompanyAgents(supabase, companyId),
         ]);
 
         // Defensive: sql/add_services.sql may not have been run yet — degrade
@@ -107,14 +104,9 @@ export default function InquiryRemovalClientList({ refreshKey, onCheckEligibilit
 
         // 3. BUILD THE AGENT LOOKUP DICTIONARY
         const agentLookupMap = {};
-        if (agentRes.error && agentRes.error.code !== 'PGRST116') {
-            console.warn("Could not fetch agents list:", agentRes.error);
-        } else if (agentRes.data) {
-            agentRes.data.forEach(a => {
-                agentLookupMap[a.id] = a.full_name;
-            });
-            setDbAgents(agentRes.data.map(a => a.full_name));
-        }
+        agentRoster.forEach(a => { agentLookupMap[a.id] = a.full_name; });
+        setDbAgents(agentRoster.map(a => a.full_name));
+        setAgentsList(agentRoster);
 
         // 4. ENRICH AND STANDARDIZE CLIENT DATA
         // Service filter happens here (client-side) instead of in the query
@@ -271,13 +263,22 @@ export default function InquiryRemovalClientList({ refreshKey, onCheckEligibilit
                     </div>
                   </td>
                   <td>
-                    <Badge 
-                        bg={client.agentName === "N/A" ? "secondary" : "light"} 
-                        text={client.agentName === "N/A" ? "white" : "dark"} 
-                        className="border fw-normal"
-                    >
-                        {client.agentName}
-                    </Badge>
+                    {isCompanyAdmin ? (
+                      <AgentAssignSelect
+                        clientId={client.id}
+                        agentId={client.agent_id}
+                        agents={agentsList}
+                        onAssigned={handleAgentAssigned}
+                      />
+                    ) : (
+                      <Badge
+                          bg={client.agentName === "N/A" ? "secondary" : "light"}
+                          text={client.agentName === "N/A" ? "white" : "dark"}
+                          className="border fw-normal"
+                      >
+                          {client.agentName}
+                      </Badge>
+                    )}
                   </td>
                   <td>
                     <div className="d-flex flex-wrap gap-1">

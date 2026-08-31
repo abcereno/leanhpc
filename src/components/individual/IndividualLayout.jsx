@@ -13,7 +13,6 @@ import { Joyride, STATUS } from 'react-joyride';
 import Sidebar from './Sidebar'; 
 import ProfileDashboard from './steps/ProfileDashboard';
 import FreshStartClassroom from './sidebars/FreshStartClassroom';
-import RequestHelpView from './sidebars/RequestHelpView'; 
 import ServiceSelectionModal from './modals/ServiceSelectionModal';
 import UniversalPaymentModal from './modals/UniversalPaymentModal';
 import ServiceConfiguratorView from './sidebars/ServiceConfiguratorView';
@@ -27,6 +26,7 @@ import VisionBoardView from './sidebars/VisionBoardView';
 // 👇 NEW: Import the Bell Component 👇
 import ClientNotificationBell from './ClientNotificationBell';
 import SubscriptionLocked from '../shared/access/SubscriptionLocked';
+import SupportChatLauncher from '../shared/support/SupportChatLauncher';
 
 import step1 from "../../assets/videos/step1.mp4";
 
@@ -50,6 +50,10 @@ export default function IndividualLayout() {
   
   const [requestingHelp, setRequestingHelp] = useState(false);
   const [helpRequested, setHelpRequested] = useState(false);
+  // Support Chat is an overlay (SupportChatLauncher), not a page — the
+  // "Support" sidebar tab opens it without navigating away from whatever
+  // tab the client was already on, same treatment as the company portal.
+  const [supportChatOpen, setSupportChatOpen] = useState(false);
 
   const [runTour, setRunTour] = useState(false);
   const [tourKey, setTourKey] = useState(0); 
@@ -308,8 +312,14 @@ export default function IndividualLayout() {
         return;
     }
 
+    if (tabId === "help") {
+        setSupportChatOpen(true);
+        setShowMobileMenu(false);
+        return;
+    }
+
     setActiveTab(tabId);
-    setShowMobileMenu(false); 
+    setShowMobileMenu(false);
   };
 
   const renderContent = () => {
@@ -321,7 +331,6 @@ export default function IndividualLayout() {
       case "ebook": return <EbookView client={client} />;
       case "vision-board": return <VisionBoardView clientId={clientId} onNextStep={() => setActiveTab('dashboard')} />;
       case "financing": return <FinancingView client={client} />;
-      case "help": return <RequestHelpView user={user} />;
       case "dashboard":
       default:
         return <ProfileDashboard 
@@ -511,11 +520,20 @@ export default function IndividualLayout() {
         }}
       />
 
-      <UniversalPaymentModal 
+      <UniversalPaymentModal
         show={showPaymentModal}
         onHide={() => setShowPaymentModal(false)}
         serviceType={selectedService}
         clientId={clientId}
+      />
+
+      <SupportChatLauncher
+        clientId={clientId}
+        senderId={user?.id}
+        senderName={client?.full_name || user?.email}
+        senderType="individual"
+        open={supportChatOpen}
+        onOpenChange={setSupportChatOpen}
       />
     </div>
   );

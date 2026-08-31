@@ -19,7 +19,8 @@ import ClientSummaryModal from '../admin/client-profile/modals/ClientSummaryModa
 import QuickEligibilityChecker from "../shared/ui/QuickEligibilityChecker";
 import CompanyVisionBoard from './CompanyVisionBoard';
 import ClientReportPage from '../shared/client-pages/ClientReportPage';
-import CompanySettingsPanel from './CompanySettingsPanel'; 
+import CompanySettingsPanel from './CompanySettingsPanel';
+import SupportChatLauncher from '../shared/support/SupportChatLauncher';
 
 // --- HELPER: Standardize empty/unassigned agents ---
 const standardizeAgentName = (name) => {
@@ -42,11 +43,16 @@ const STAGE_TITLES = {
 
 const CompanyPortalDashboard = () => {
   // 👇 Pulled companyName so we can pass it to the Timeline for Dennis 👇
-  const { user, loading, error, isCompanyAdmin, isAgent, companyId, companyName, companyLogoUrl, signOut } = useCompanyAuth();
+  const { user, loading, error, isCompanyAdmin, isAgent, companyId, companyName, companyLogoUrl, fullName, signOut } = useCompanyAuth();
   const navigate = useNavigate();
 
   // Layout State
-  const [currentView, setCurrentView] = useState('overview'); 
+  const [currentView, setCurrentView] = useState('overview');
+  // Support Chat is an overlay (SupportChatLauncher), not a page — a
+  // separate currentView === 'support' would navigate away from whatever
+  // an agent was doing, defeating the point of an overlay that's supposed
+  // to sit on top of the current page.
+  const [supportChatOpen, setSupportChatOpen] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [dashboardError, setDashboardError] = useState(null);
 
@@ -307,7 +313,12 @@ const CompanyPortalDashboard = () => {
                     <i className="bi bi-stars me-3 fs-5" style={{ color: currentView === 'vision_board' ? '#38bdf8' : '#64748b' }}></i> Vision Board
                 </div>
             </Nav.Item>
-            
+            <Nav.Item>
+                <div onClick={() => { setSupportChatOpen(true); setShowMobileMenu(false); }} className={`d-flex align-items-center rounded-3 p-2 px-3 cursor-pointer ${supportChatOpen ? 'text-white shadow-sm' : 'hover-bg-dark'}`} style={{ transition: 'all 0.2s', fontWeight: supportChatOpen ? '700' : '500', backgroundColor: supportChatOpen ? '#1e293b' : 'transparent', color: supportChatOpen ? '#ffffff' : '#94a3b8' }}>
+                    <i className="bi bi-chat-dots-fill me-3 fs-5" style={{ color: supportChatOpen ? '#38bdf8' : '#64748b' }}></i> Support Chat
+                </div>
+            </Nav.Item>
+
             {isCompanyAdmin && (
               <Nav.Item>
                   <div onClick={() => { setCurrentView('settings'); setShowMobileMenu(false); }} className={`d-flex align-items-center rounded-3 p-2 px-3 cursor-pointer ${currentView === 'settings' ? 'text-white shadow-sm' : 'hover-bg-dark'}`} style={{ transition: 'all 0.2s', fontWeight: currentView === 'settings' ? '700' : '500', backgroundColor: currentView === 'settings' ? '#1e293b' : 'transparent', color: currentView === 'settings' ? '#ffffff' : '#94a3b8' }}>
@@ -464,6 +475,7 @@ const CompanyPortalDashboard = () => {
                 <div className="animate-fade-in h-100 overflow-auto custom-scrollbar"><CompanyVisionBoard clientId={user?.id} /></div>
             )}
 
+
             {currentView === 'settings' && isCompanyAdmin && (
                 <div className="animate-fade-in h-100 overflow-auto custom-scrollbar"><CompanySettingsPanel companyId={companyId} /></div>
             )}
@@ -562,6 +574,15 @@ const CompanyPortalDashboard = () => {
             </ListGroup>
         </Offcanvas.Body>
       </Offcanvas>
+
+      <SupportChatLauncher
+        companyId={companyId}
+        senderId={user?.id}
+        senderName={fullName || user?.email}
+        senderType="company"
+        open={supportChatOpen}
+        onOpenChange={setSupportChatOpen}
+      />
     </div>
   );
 };

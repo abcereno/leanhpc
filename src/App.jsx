@@ -103,6 +103,7 @@ const ManagementLogs = lazy(() => import("./components/admin/ManagementLogs"));
 const AdminPaymentVerifications = lazy(() => import("./components/admin/AdminPaymentVerifications"));
 const AdminNewLeads = lazy(() => import("./components/admin/AdminNewLeads"));
 const SupportConsole = lazy(() => import("./components/admin/SupportConsole"));
+const SupportInbox = lazy(() => import("./components/admin/SupportInbox"));
 const CreditReportWorkspace = lazy(() => import("./components/admin/CreditReportWorkspace"));
 function CreditFileViewer() {
   const { clientId } = useParams();
@@ -311,6 +312,7 @@ function AppRoutes() {
 
             <Route element={<PermissionGuard permissions={['view_call_queue', 'view_clients']} />}>
               <Route path="/support-console" element={<SupportConsole />} />
+              <Route path="/support-inbox" element={<SupportInbox />} />
             </Route>
 
             {/* Local 404 for Admin Layout */}

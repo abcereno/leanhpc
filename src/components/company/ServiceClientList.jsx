@@ -15,12 +15,15 @@ import { useNavigate } from 'react-router-dom';
 import { Table, Button, Spinner, Alert, Badge, ProgressBar, Form, InputGroup, Row, Col } from 'react-bootstrap';
 import ClientSummaryModal from '../admin/client-profile/modals/ClientSummaryModal';
 import { resolveServiceId, serviceLabel } from '../../utils/services';
+import { standardizeAgentName, fetchCompanyAgents } from '../../utils/agentDisplay';
+import AgentAssignSelect from './AgentAssignSelect';
 
 export default function ServiceClientList({ serviceId, refreshKey, onCheckEligibility }) {
-  const { companyId, isAgent, user, loading: companyLoading, error: companyError } = useCompanyAuth();
+  const { companyId, isAgent, isCompanyAdmin, user, loading: companyLoading, error: companyError } = useCompanyAuth();
   const navigate = useNavigate();
 
   const [clients, setClients] = useState([]);
+  const [agentsList, setAgentsList] = useState([]); // { id, full_name } roster, for the assign picker
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -78,7 +81,10 @@ export default function ServiceClientList({ serviceId, refreshKey, onCheckEligib
           return q.order('created_at', { ascending: false });
         };
 
-        let { data: clientData, error: clientError } = await buildQuery(CLIENT_FIELDS);
+        let [{ data: clientData, error: clientError }, agentRoster] = await Promise.all([
+          buildQuery(CLIENT_FIELDS),
+          fetchCompanyAgents(supabase, companyId),
+        ]);
 
         // Defensive: sql/add_services.sql may not have been run yet — degrade
         // gracefully rather than blanking out this whole list.
@@ -88,6 +94,10 @@ export default function ServiceClientList({ serviceId, refreshKey, onCheckEligib
         }
 
         if (clientError) throw clientError;
+
+        setAgentsList(agentRoster);
+        const agentLookupMap = {};
+        agentRoster.forEach(a => { agentLookupMap[a.id] = a.full_name; });
 
         // Paid clients only — unpaid leads live on the "New Leads" tab
         // (NewLeadsList.jsx) instead, so this list isn't cluttered with
@@ -104,10 +114,14 @@ export default function ServiceClientList({ serviceId, refreshKey, onCheckEligib
                 : 0;
 
             const pScore = client.progress ? Math.round(Number(client.progress) * 100) : 0;
+            // Was `client.agent || "—"` — ignored agent_id entirely, so any
+            // client whose agent was set via agent_id (the newer, canonical
+            // field per NewLeadForm.jsx) always showed as unassigned here.
+            const rawAgentName = client.agent || agentLookupMap[client.agent_id] || "N/A";
 
             return {
                 ...client,
-                agentName: client.agent || "—",
+                agentName: standardizeAgentName(rawAgentName),
                 pendingCount,
                 completedCount,
                 progress: pScore
@@ -132,9 +146,20 @@ export default function ServiceClientList({ serviceId, refreshKey, onCheckEligib
   }, [companyId, companyLoading, companyError, refreshKey, isAgent, user?.id, serviceId]);
 
   const uniqueAgents = useMemo(() => {
-      const agents = new Set(clients.map(c => c.agentName).filter(n => n !== "—"));
+      const agents = new Set(clients.map(c => c.agentName).filter(n => n !== "N/A"));
       return Array.from(agents).sort();
   }, [clients]);
+
+  // Applied after AgentAssignSelect writes the new agent_id, so the row
+  // reflects the reassignment immediately without a full refetch.
+  const handleAgentAssigned = (clientId, newAgentId) => {
+    const newName = agentsList.find(a => a.id === newAgentId)?.full_name || null;
+    setClients(prev => prev.map(c => (
+      c.id === clientId
+        ? { ...c, agent_id: newAgentId, agent: null, agentName: standardizeAgentName(newName || "N/A") }
+        : c
+    )));
+  };
 
   // A bureau counts as done whether it's actually Complete OR marked N/A —
   // matching utils/clientsData.js#bureausAllDone (the definition every
@@ -226,7 +251,18 @@ export default function ServiceClientList({ serviceId, refreshKey, onCheckEligib
                       <small className="text-muted">{serviceLabel(client, "—")} • {client.counter || 0}</small>
                     </div>
                   </td>
-                  <td><Badge bg="light" text="dark" className="border fw-normal">{client.agentName}</Badge></td>
+                  <td>
+                    {isCompanyAdmin ? (
+                      <AgentAssignSelect
+                        clientId={client.id}
+                        agentId={client.agent_id}
+                        agents={agentsList}
+                        onAssigned={handleAgentAssigned}
+                      />
+                    ) : (
+                      <Badge bg="light" text="dark" className="border fw-normal">{client.agentName}</Badge>
+                    )}
+                  </td>
                   <td>
                     <div className="d-flex flex-wrap gap-1">
                       {client.status_stage && <Badge bg="primary">{client.status_stage}</Badge>}

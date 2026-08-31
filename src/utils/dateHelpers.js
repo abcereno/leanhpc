@@ -1,5 +1,16 @@
 import { supabase } from "../supabaseClient";
 
+// "YYYY-MM-DD" -> "MM/DD/YYYY" for display. Passes through anything else
+// (null, already-odd-shaped strings) unchanged rather than throwing — used
+// wherever a raw AI-extracted date (expiresAt/issuedAt from
+// supabase/functions/validate-document) gets shown to an admin, e.g.
+// CoverLetterAssets.jsx and AlignmentCheckPanel.jsx's "AI detected" lines.
+export function formatYmd(ymd) {
+  if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd || null;
+  const [y, m, d] = ymd.split("-");
+  return `${m}/${d}/${y}`;
+}
+
 let cachedHolidays = null;
 
 export async function getHolidays() {

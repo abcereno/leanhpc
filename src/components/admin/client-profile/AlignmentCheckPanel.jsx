@@ -18,11 +18,14 @@
 // check-row-count pattern for detecting a silent RLS no-op) rather than a
 // third parallel implementation.
 import { useEffect, useState } from "react";
-import { Card, Badge, Button, Spinner, OverlayTrigger, Tooltip } from "react-bootstrap";
+import { Card, Badge, Button, Spinner, OverlayTrigger, Tooltip, Dropdown } from "react-bootstrap";
 import { supabase } from "../../../supabaseClient";
 import { validateDocument } from "../../../utils/validateDocument";
 import { useToast } from "../../shared/ui/ToastNotifier";
 import { useAlignmentDocs } from "../../../hooks/useAlignmentDocs";
+import { useAuth } from "../../../context/AuthContext";
+import { buildAiDetectedLines } from "../../../utils/documentAssetLabels";
+import { overrideDocumentValidation, OVERRIDE_STATUS_LABELS } from "../../../utils/overrideDocumentValidation";
 
 const BUCKET = "clients"; // ftc_report + letter files live here (LetterEditorModal.jsx's bucket) — NOT the separate "cover-letter-assets" bucket CoverLetterAssets.jsx uses for license/ssn/poa.
 
@@ -61,8 +64,10 @@ function MatchBadge({ label, value }) {
 
 export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh }) {
   const { addToast } = useToast();
+  const { fullName: adminName } = useAuth();
   const [client, setClient] = useState(null);
   const [checkingId, setCheckingId] = useState(null); // row id (or 'license'/'ssn'/'poa') currently being checked
+  const [overridingId, setOverridingId] = useState(null); // same keying as checkingId, for the manual-override action
 
   // Document fetch + legacy/LTOS merge is shared with ClientHeader.jsx's
   // Personal Info "AI detected from ID" sub-lines — see useAlignmentDocs.js.
@@ -174,6 +179,51 @@ export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh })
     }
   };
 
+  // Manual override — a human looked at the document and is overruling
+  // whatever the AI decided. This exists because OCR on a busy/watermarked
+  // scan will never be 100% reliable (e.g. a diagonal state seal crossing
+  // the expiration-date digits), so admins need a way to correct a wrong
+  // AI call without it reverting back on the next re-check. Distinct from
+  // "Re-check" (which re-runs the AI) — this bypasses the AI entirely and
+  // records who did it and when, so a manual override is never mistaken
+  // for a fresh AI confirmation later.
+  const overrideStatus = async (row, checkKey, status) => {
+    if (!row) return;
+    const label = OVERRIDE_STATUS_LABELS[status] || status;
+    if (!window.confirm(`Mark this document as "${label}"? This overrides the AI result and will be recorded as a manual override.`)) return;
+
+    setOverridingId(checkKey);
+    try {
+      const result = await overrideDocumentValidation({
+        id: row.id,
+        status,
+        adminName,
+        previousNotes: row.validation_notes,
+        previousDetails: row.validation_details,
+      });
+
+      if (!result.success) {
+        addToast({
+          title: "Override Didn't Save",
+          message: result.error,
+          variant: "danger",
+          icon: "bi-exclamation-octagon-fill",
+          timeout: 12000,
+        });
+        return;
+      }
+
+      addToast({ title: "Overridden", message: `Marked "${result.label}" manually.`, variant: "success", icon: "bi-person-check-fill" });
+      await reload();
+      onRefresh && onRefresh();
+    } catch (err) {
+      console.error("Manual override error:", err);
+      addToast({ title: "Override Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+    } finally {
+      setOverridingId(null);
+    }
+  };
+
   if (migrationMissing) {
     return (
       <Card className="border-warning">
@@ -237,12 +287,15 @@ export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh })
             {identityRows.map(({ kind, label, row, checks, fields }) => (
               <AlignmentRow
                 key={kind}
+                kind={kind}
                 label={label}
                 row={row}
                 checks={checks}
                 fields={fields}
                 checking={checkingId === kind}
                 onCheck={() => runCheck(row, kind)}
+                overriding={overridingId === kind}
+                onOverride={(status) => overrideStatus(row, kind, status)}
                 missingText={kind === "authorization" ? "Not uploaded — optional (Limited POA), when applicable." : "Not uploaded yet."}
               />
             ))}
@@ -253,6 +306,8 @@ export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh })
               fields={CHECK_FIELDS.ftc_report}
               checking={checkingId === ftcReport?.id}
               onCheck={() => runCheck(ftcReport, null)}
+              overriding={overridingId === ftcReport?.id}
+              onOverride={(status) => overrideStatus(ftcReport, ftcReport?.id, status)}
               missingText="No FTC report on file — attach one from Docs Routing's FTC checkbox."
             />
             {letters.length === 0 ? (
@@ -267,6 +322,8 @@ export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh })
                   fields={CHECK_FIELDS.letter}
                   checking={checkingId === l.id}
                   onCheck={() => runCheck(l, null)}
+                  overriding={overridingId === l.id}
+                  onOverride={(status) => overrideStatus(l, l.id, status)}
                   missingText=""
                 />
               ))
@@ -278,12 +335,23 @@ export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh })
   );
 }
 
-function AlignmentRow({ label, row, checks, fields, checking, onCheck, missingText }) {
+function AlignmentRow({ kind, label, row, checks, fields, checking, onCheck, overriding, onOverride, missingText }) {
   const notChecked = row && (!row.validation_status || row.validation_status === "pending");
+  const isOverridden = !!row?.validation_details?.manualOverride;
+  const aiDetectedLines = buildAiDetectedLines(kind, checks);
   return (
     <div className="d-flex align-items-start justify-content-between border-bottom pb-2">
       <div>
-        <div className="fw-semibold small">{label}</div>
+        <div className="fw-semibold small">
+          {label}
+          {isOverridden && (
+            <OverlayTrigger overlay={<Tooltip>{row.validation_notes}</Tooltip>}>
+              <Badge bg="info" text="dark" className="fw-normal ms-2" style={{ cursor: "help" }}>
+                <i className="bi bi-person-check-fill me-1" />Manually overridden
+              </Badge>
+            </OverlayTrigger>
+          )}
+        </div>
         {!row ? (
           <div className="text-muted small fst-italic">{missingText}</div>
         ) : notChecked ? (
@@ -293,7 +361,18 @@ function AlignmentRow({ label, row, checks, fields, checking, onCheck, missingTe
             {fields.map((f) => (
               <MatchBadge key={f.key} label={f.label} value={checks?.[f.key]} />
             ))}
-            {row.validation_notes && (
+            {aiDetectedLines.length > 0 && (
+              <div
+                className="text-muted small mt-1 px-2 py-1 rounded"
+                style={{ display: "inline-block", lineHeight: 1.4, background: "rgba(148, 163, 184, 0.08)", border: "1px solid rgba(148, 163, 184, 0.15)" }}
+              >
+                <div className="fw-semibold text-uppercase" style={{ fontSize: "0.62rem", letterSpacing: "0.4px", opacity: 0.85 }}>
+                  <i className="bi bi-robot me-1" />AI Detected
+                </div>
+                {aiDetectedLines.map((line, i) => <div key={i}>{line}</div>)}
+              </div>
+            )}
+            {row.validation_notes && !isOverridden && (
               <OverlayTrigger overlay={<Tooltip>{row.validation_notes}</Tooltip>}>
                 <i className="bi bi-info-circle text-muted ms-1" style={{ cursor: "help" }} />
               </OverlayTrigger>
@@ -302,9 +381,36 @@ function AlignmentRow({ label, row, checks, fields, checking, onCheck, missingTe
         )}
       </div>
       {row && (
-        <Button size="sm" variant="outline-secondary" onClick={onCheck} disabled={checking}>
-          {checking ? <Spinner size="sm" /> : notChecked ? "Check Now" : "Re-check"}
-        </Button>
+        <div className="d-flex align-items-center gap-2 flex-shrink-0">
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            style={{ color: "var(--primary-blue, #0EA5E9)", borderColor: "var(--primary-blue, #0EA5E9)" }}
+            onClick={onCheck}
+            disabled={checking || overriding}
+          >
+            {checking ? <Spinner size="sm" /> : notChecked ? "Check Now" : "Re-check"}
+          </Button>
+          {onOverride && (
+            <Dropdown align="end">
+              <Dropdown.Toggle
+                size="sm"
+                variant="outline-dark"
+                style={{ color: "var(--accent-gold, #F59E0B)", borderColor: "var(--accent-gold, #F59E0B)" }}
+                disabled={checking || overriding}
+                id={`override-${label}`}
+              >
+                {overriding ? <Spinner size="sm" /> : "Override"}
+              </Dropdown.Toggle>
+              <Dropdown.Menu>
+                <Dropdown.Item onClick={() => onOverride("valid")}><i className="bi bi-check-circle-fill text-success me-2" />Mark Valid</Dropdown.Item>
+                <Dropdown.Item onClick={() => onOverride("expired")}><i className="bi bi-clock-history text-warning me-2" />Mark Expired</Dropdown.Item>
+                <Dropdown.Item onClick={() => onOverride("invalid")}><i className="bi bi-x-circle-fill text-danger me-2" />Mark Invalid</Dropdown.Item>
+                <Dropdown.Item onClick={() => onOverride("needs_review")}><i className="bi bi-question-circle-fill text-warning me-2" />Mark Needs Review</Dropdown.Item>
+              </Dropdown.Menu>
+            </Dropdown>
+          )}
+        </div>
       )}
     </div>
   );

@@ -11,6 +11,8 @@ import {
 } from "react-bootstrap";
 import useFinancialLogs from "../../hooks/useFinancialLogs";
 import { useAuth } from "../../context/AuthContext";
+import { dayTS, sumInWeek } from "../../utils/weekRangeSum";
+import SearchableSelect from "../shared/ui/SearchableSelect";
 import IncomeChart from "./IncomeChart";
 import NetProfitTrend from "./NetProfitTrend";
 import PayrollChart from "./PayrollChart";
@@ -51,10 +53,6 @@ const num = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
-
-// Robust day timestamp helper: normalize any date/ISO to midnight UTC
-const dayTS = (v) =>
-  v ? Date.parse(String(v).slice(0, 10) + "T00:00:00Z") : NaN;
 
 export default function FinancialDashboard() {
   const { userId } = useAuth();
@@ -128,6 +126,12 @@ export default function FinancialDashboard() {
   const incomeRows = useMemo(() => incomes, [incomes]);
   const expenseRows = useMemo(() => expenses, [expenses]);
 
+  // Add Income's client picker needs plain { value, label } options
+  const clientOptions = useMemo(
+    () => (clients || []).map((c) => ({ value: c.id, label: c.full_name || c.id })),
+    [clients]
+  );
+
   // ---- Handlers
   const handleAddIncome = async (e) => {
     e.preventDefault();
@@ -171,23 +175,11 @@ export default function FinancialDashboard() {
   };
 
   // Sum bonuses within the payroll week range (inclusive)
-  const sumBonusesFor = (employee_id, week_start, week_end) => {
-    const s = dayTS(week_start);
-    const e = dayTS(week_end);
-    return bonuses
-      .filter((b) => {
-        if (b.employee_id !== employee_id) return false;
-        const ts = dayTS(b.week_start);
-        return (
-          Number.isFinite(s) &&
-          Number.isFinite(e) &&
-          Number.isFinite(ts) &&
-          ts >= s &&
-          ts <= e
-        );
-      })
-      .reduce((sum, b) => sum + num(b.bonus_amount), 0);
-  };
+  const sumBonusesFor = (employee_id, week_start, week_end) =>
+    sumInWeek(
+      bonuses.filter((b) => b.employee_id === employee_id),
+      { dateKey: "week_start", amountKey: "bonus_amount", weekStart: week_start, weekEnd: week_end }
+    );
 
   // quick presets (optional)
   const setPreset = (days) => {
@@ -317,10 +309,10 @@ export default function FinancialDashboard() {
                 </Col>
                 <Col md={6}>
                   <NetProfitTrend
-                    payroll={payroll} // base payroll trend; can extend to include bonuses if you want
-                    totalIncome={totalIncome}
-                    totalExpenses={totalExpenses}
-                    logs={logsCompat}
+                    payroll={payroll}
+                    incomes={incomeRows}
+                    expenses={expenseRows}
+                    bonuses={bonuses}
                   />
                 </Col>
               </Row>
@@ -370,10 +362,12 @@ export default function FinancialDashboard() {
                     <tr key={r.id}>
                       <td>{r.date}</td>
                       <td>
-                        {r.client_id && r.client_id.trim() !== ""
-                          ? clients.find((c) => c.id === r.client_id)
-                              ?.full_name || r.client_id
-                          : r.client_name || "—"}
+                        {/* incomes query already embeds client:client_id, so
+                            read it directly instead of re-searching the
+                            separate `clients` list fetch — one source of
+                            truth, and immune to the two queries ever
+                            drifting out of sync. */}
+                        {r.client?.full_name || r.client_name || "—"}
                       </td>
                       <td>{r.category || "—"}</td>
                       <td>{r.source || "—"}</td>
@@ -516,11 +510,9 @@ export default function FinancialDashboard() {
                         <td>{money(r.amount)}</td>
                         <td>{r.notes || "—"}</td>
                         <td>
-                          {/* Try to resolve to profile full_name; fallback to ID */}
-                          {r.employee_id
-                            ? profiles.find((p) => p.id === r.employee_id)
-                                ?.full_name || r.employee_id
-                            : "—"}
+                          {/* expenses query already embeds employee:employee_id,
+                              same reasoning as the income row's client column above. */}
+                          {r.employee?.full_name || r.employee_id || "—"}
                         </td>
                         <td>
                           <Button
@@ -595,16 +587,12 @@ export default function FinancialDashboard() {
           <Modal.Body>
             <Form.Group className="mb-3">
               <Form.Label>Client</Form.Label>
-              <Form.Select name="client_id" required defaultValue="">
-                <option value="" disabled>
-                  Select a client
-                </option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.full_name || c.id}
-                  </option>
-                ))}
-              </Form.Select>
+              <SearchableSelect
+                name="client_id"
+                options={clientOptions}
+                placeholder="Search clients…"
+                required
+              />
             </Form.Group>
 
             <Form.Group className="mb-3">

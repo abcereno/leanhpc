@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../supabaseClient";
+import { fetchAllRows } from "../utils/fetchAllRows";
 
 export default function useFinancialLogs(startDate, endDate) {
   // datasets
@@ -36,6 +37,10 @@ export default function useFinancialLogs(startDate, endDate) {
 
     try {
       // ---- Incomes
+      // .range(0, 99999) on every query below — same fix as fetchClients()
+      // above. These totals feed the dashboard's Total Income/Expenses/
+      // Payroll/Net Profit cards directly, so a silent 1000-row truncation
+      // here doesn't just hide rows, it makes the reported totals wrong.
       let iq = supabase
         .from("incomes")
         .select(
@@ -46,7 +51,8 @@ export default function useFinancialLogs(startDate, endDate) {
           employee:employee_id ( id, full_name )
         `
         )
-        .order("date", { ascending: false });
+        .order("date", { ascending: false })
+        .range(0, 99999);
       iq = applyDateRange(iq, "date");
       const { data: incomeData, error: incomeError } = await iq;
       if (incomeError) throw incomeError;
@@ -65,7 +71,8 @@ export default function useFinancialLogs(startDate, endDate) {
           company:company_id ( id, company_name )
         `
         )
-        .order("date", { ascending: false });
+        .order("date", { ascending: false })
+        .range(0, 99999);
       eq = applyDateRange(eq, "date");
       const { data: expenseData, error: expenseError } = await eq;
       if (expenseError) throw expenseError;
@@ -79,7 +86,8 @@ export default function useFinancialLogs(startDate, endDate) {
       let pq = supabase
         .from("payroll_summary")
         .select(`*, profiles:employee_id ( full_name )`)
-        .order("week_start", { ascending: false });
+        .order("week_start", { ascending: false })
+        .range(0, 99999);
       if (startDate) pq = pq.gte("week_start", startDate);
       if (endDate) pq = pq.lte("week_end", endDate);
       const { data: payrollData, error: payrollError } = await pq;
@@ -96,7 +104,8 @@ export default function useFinancialLogs(startDate, endDate) {
           id, week_start, employee_id, bonus_amount, reason, created_at,
           profiles:employee_id ( id, full_name )
         `)
-        .order("week_start", { ascending: false });
+        .order("week_start", { ascending: false })
+        .range(0, 99999);
       if (startDate) bq = bq.gte("week_start", startDate);
       if (endDate) bq = bq.lte("week_start", endDate);
       const { data: bonusData, error: bonusError } = await bq;
@@ -131,15 +140,22 @@ export default function useFinancialLogs(startDate, endDate) {
     const { data, error } = await supabase
       .from("profiles")
       .select("id, full_name")
-      .order("full_name", { ascending: true });
+      .order("full_name", { ascending: true })
+      .range(0, 99999);
     if (!error && data) setProfiles(data);
   }, []);
 
   const fetchClients = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("clients")
-      .select("id, full_name")
-      .order("full_name", { ascending: true });
+    // Paginated fetch (see fetchAllRows) rather than a single
+    // .range(0, 99999) call — a bare .range() was tried first here and
+    // reportedly still left clients missing from the Add Income picker,
+    // which points at a Supabase project-level API "Max Rows" setting
+    // silently capping every request below what was asked for. Paging in
+    // fixed-size batches self-adjusts to whatever that real cap is.
+    const { data, error } = await fetchAllRows("clients", {
+      select: "id, full_name",
+      order: "full_name",
+    });
     if (!error && data) setClients(data);
   }, []);
 
