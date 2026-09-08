@@ -4,8 +4,13 @@ import { useAuth } from "../context/AuthContext";
 import { getHolidays, calculateBusinessDays, calculatePaidRunningDays } from "../utils/dateHelpers";
 import { useToast } from "../components/shared/ui/ToastNotifier";
 import { resolveServiceId } from "../utils/services";
+import { allBureausResolved } from "../utils/inquiryCounts";
+import { fetchNextStepSignals, getNextStepTag } from "../utils/nextStepTag";
 
 const DAY = 24 * 60 * 60 * 1000;
+
+// Each sortable column's first-click direction — see handleSort below.
+const SORT_DEFAULT_DIRECTION = { name: "asc", company: "asc", agent: "asc", progress: "desc", duration: "desc" };
 
 export default function useAdminClients() {
   const { addToast } = useToast();
@@ -39,6 +44,26 @@ export default function useAdminClients() {
 
   const [page, setPage] = useState(1);
   const pageSize = 25;
+
+  // Column sorting — null sortField keeps the existing default order
+  // (most pending tasks first, then newest). Each column gets its own
+  // sensible first-click direction: text columns start A-Z, day-count/
+  // progress columns start with the biggest number first (so clicking
+  // Duration reads top-to-bottom the same way a hand-kept aging
+  // spreadsheet is usually sorted — oldest/reddest files at the top).
+  const [sortField, setSortField] = useState(null);
+  const [sortDirection, setSortDirection] = useState("desc");
+  const handleSort = useCallback((field) => {
+    setSortField((prevField) => {
+      if (prevField === field) {
+        setSortDirection((prevDir) => (prevDir === "asc" ? "desc" : "asc"));
+      } else {
+        setSortDirection(SORT_DEFAULT_DIRECTION[field] || "asc");
+      }
+      return field;
+    });
+    setPage(1);
+  }, []);
 
   // Companies State (Fetched from DB)
   const [dbCompanies, setDbCompanies] = useState([]);
@@ -103,7 +128,14 @@ export default function useAdminClients() {
       // alongside active files.
       const paidRunningDays = calculatePaidRunningDays(r, holidays, now);
 
-      const all_completed = !!(r.exp_completed && r.tu_completed && r.eq_completed);
+      // N/A-inclusive — see utils/inquiryCounts.js#allBureausResolved. The
+      // old `exp_completed && tu_completed && eq_completed` check ignored
+      // exp_na/tu_na/eq_na entirely, so a client fully resolved with a
+      // legitimately N/A bureau read progress: 100% but all_completed:
+      // false — missing from the admin Completed tab filter (line ~401
+      // below) and never turning green in AdminClientList.jsx's row
+      // coloring despite showing 100% progress.
+      const all_completed = allBureausResolved(r);
 
       const companies = r.companies ?? (r.company_name ? { company_name: r.company_name } : undefined);
       const profiles = r.profiles ?? (r.admin_full_name ? { full_name: r.admin_full_name } : undefined);
@@ -219,8 +251,25 @@ export default function useAdminClients() {
         profiles: r.admin_id ? { full_name: adminMap.get(r.admin_id) ?? "—" } : undefined,
       }));
 
-      const enriched = enrichRows(merged, holidays);
-      
+      // "What does this client need next" tag (utils/nextStepTag.js) — one
+      // more bulk fetch, same pattern as adminMap/companyMap above, then
+      // attached per row after enrichRows so it can read all_completed
+      // (computed by enrichRows via allBureausResolved).
+      const nextStepSignals = await fetchNextStepSignals(supabase, baseRows.map((r) => r.id));
+
+      const enriched = enrichRows(merged, holidays).map((r) => ({
+        ...r,
+        nextStepTag: getNextStepTag(r, nextStepSignals),
+        // AdminClientList.jsx's "DOC ISSUE" badge has referenced
+        // client.hasDocIssue since it was added, but nothing in this
+        // pipeline ever set it (that field only existed in
+        // clientsData.js's separate, heavier Ops Dashboard pipeline) — the
+        // badge has always silently evaluated to false. nextStepSignals
+        // already fetches this exact data for the tag above, so wiring it
+        // through here as well fixes that badge for free.
+        hasDocIssue: nextStepSignals.hasDocIssue.has(r.id),
+      }));
+
       enriched.sort((a, b) => {
         if (b.pendingTasksCount !== a.pendingTasksCount) return b.pendingTasksCount - a.pendingTasksCount;
         return new Date(b.created_at) - new Date(a.created_at);
@@ -396,9 +445,21 @@ export default function useAdminClients() {
 
     return groupedClients.filter((group) => {
       const c = group.rounds[group.rounds.length - 1];
-      if (activeTab === "paid" && !c.is_paid) return false;
-      if (activeTab === "unpaid" && c.is_paid) return false;
+      // Paid/Unpaid both exclude completed clients now, matching how
+      // AdminClientList.jsx's own tab-count badges next to these same tabs
+      // are already defined (paid_at && !all_completed / !paid_at &&
+      // !all_completed / all_completed — a clean 3-way partition that adds
+      // up to "All Clients"). The badges were already right; this filter
+      // wasn't reading them the same way, so clicking "Paid" showed every
+      // paid client including ones long since completed, with no way to
+      // see just the still-active ones.
+      if (activeTab === "paid" && (!c.is_paid || c.all_completed)) return false;
+      if (activeTab === "unpaid" && (c.is_paid || c.all_completed)) return false;
       if (activeTab === "completed" && !c.all_completed) return false;
+      // Paid clients still in progress — unpaid clients aren't being
+      // actively worked yet, so "not completed" only matters for people
+      // who've actually paid.
+      if (activeTab === "not_completed" && (!c.is_paid || c.all_completed)) return false;
       
       if (taskFilter === "pending" && c.pendingTasksCount === 0) return false;
       if (taskFilter === "resolved" && c.completedTasksCount === 0) return false;
@@ -446,12 +507,45 @@ export default function useAdminClients() {
     });
   }, [groupedClients, search, dateFrom, dateTo, companyFilter, agentFilter, serviceFilter, daysFilter, paidDaysFilter, activeTab, taskFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredClientList.length / pageSize));
-  
+  // Applied on top of filteredClientList's own default ordering — leaves
+  // that default alone (sortField === null) until an admin actually clicks
+  // a header. Reads off the same representative-round row (last item in
+  // group.rounds) the filters above already use, and the same fields their
+  // cells render (companies.company_name, profiles.full_name — NOT client.
+  // agent, which is a different, legacy text field also present on the row)
+  // so the visible sort order always matches what's actually on screen.
+  const sortedClientList = useMemo(() => {
+    if (!sortField) return filteredClientList;
+    const dir = sortDirection === "asc" ? 1 : -1;
+    const sortValue = (group) => {
+      const c = group.rounds[group.rounds.length - 1];
+      switch (sortField) {
+        case "name": return String(c.full_name || "").toLowerCase();
+        case "company": return String(c?.companies?.company_name || "").toLowerCase();
+        case "agent": return String(c?.profiles?.full_name || "").toLowerCase();
+        case "progress": return Number(c.progress) || 0;
+        // Whichever duration is currently "live" for this client — Setup
+        // (unpaid) before payment, Active (paid) after — same distinction
+        // the Duration column itself renders.
+        case "duration": return c.is_paid ? (c.paidRunningDays ?? 0) : (c.createdRunningDays ?? 0);
+        default: return 0;
+      }
+    };
+    return [...filteredClientList].sort((a, b) => {
+      const va = sortValue(a);
+      const vb = sortValue(b);
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return 0;
+    });
+  }, [filteredClientList, sortField, sortDirection]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedClientList.length / pageSize));
+
   const pagedClients = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return filteredClientList.slice(start, start + pageSize);
-  }, [filteredClientList, page, pageSize]);
+    return sortedClientList.slice(start, start + pageSize);
+  }, [sortedClientList, page, pageSize]);
 
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages]);
 
@@ -471,7 +565,8 @@ export default function useAdminClients() {
     agentFilter, setAgentFilter, agentOptions, 
     serviceFilter, setServiceFilter, // 👈 NEW
     activeTab, setActiveTab,
-    taskFilter, setTaskFilter, 
+    taskFilter, setTaskFilter,
+    sortField, sortDirection, handleSort,
     page, setPage, pageSize, companyOptions,
     handleDeleteClient, 
     resetFilters, reload,

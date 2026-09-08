@@ -185,6 +185,9 @@ export default function AdminSidebar({ isSidebarOpen, setIsSidebarOpen }) {
                 {hasAnyPermission(['approve_count_reviews']) && (
                   <NavItem path="/count-reviews" icon="bi-clipboard-check" label="Count Reviews" iconClass="text-warning" />
                 )}
+                {hasAnyPermission(['review_ai_flags']) && (
+                  <NavItem path="/ai-review-queue" icon="bi-robot" label="AI Review Queue" iconClass="text-info" />
+                )}
 
                 <hr className="border-secondary opacity-25 mx-3" />
 

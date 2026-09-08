@@ -85,7 +85,7 @@ export default function AddAgentModal({ show, handleClose, onAgentAdded }) {
 
         <Form onSubmit={handleSubmit}>
             <Form.Group className="mb-3">
-              <Form.Label>Agent Code *</Form.Label>
+              <Form.Label>Agent Full Name *</Form.Label>
               <Form.Control
                 type="text"
                 name="fullName"

@@ -1,7 +1,7 @@
 // src/utils/aging.js
 //
 // Single source of truth for the "aging bucket" bands used across the
-// Operations Dashboard (Priority 3 of the Bernard ops sprint). Colored
+// Operations Dashboard (Priority 3 of the client's ops sprint). Colored
 // circles + click-through filters should all read from this file so the
 // bucket boundaries never drift out of sync between views.
 
@@ -18,6 +18,33 @@ export function getAgingBucket(days) {
     AGING_BUCKETS.find((b) => d >= b.min && d <= b.max) ||
     AGING_BUCKETS[AGING_BUCKETS.length - 1]
   );
+}
+
+/**
+ * Row-background class for a client-list table, matching the day-count
+ * color bands a partner company already tracks by hand in their own
+ * spreadsheet (14/21/28 business days -> yellow/orange/red), plus a
+ * completed-green and paused-cyan override. These are the same thresholds
+ * AdminClientList.jsx has used inline since it first added aging colors
+ * (see its own "Aging Colors" comment) — centralized here so a second
+ * call site (InquiryRemovalClientList.jsx) doesn't redefine the same
+ * numbers a second time and risk drifting out of sync.
+ *
+ * Classes returned (table-yellow/orange/red/green/cyan) are real global
+ * CSS rules in src/index.css, not Bootstrap's own table-* variants.
+ *
+ * Precedence: paused > completed > day thresholds. A paused file is the
+ * one that most needs a human to notice it on sight, so it wins over
+ * both "this has been sitting a while" and "this is already done."
+ */
+export function getAgingRowClass(paidBizDays, { allCompleted = false, isPaused = false } = {}) {
+  if (isPaused) return "table-cyan";
+  if (allCompleted) return "table-green";
+  if (paidBizDays == null) return "";
+  if (paidBizDays >= 28) return "table-red";
+  if (paidBizDays >= 21) return "table-orange";
+  if (paidBizDays >= 14) return "table-yellow";
+  return "";
 }
 
 /**

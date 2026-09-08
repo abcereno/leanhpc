@@ -126,7 +126,7 @@ export function computePartnerRollup(clients, companies, affiliates) {
 
 /**
  * Single "Operations Health Score" (0-100, higher is better). Weighting is
- * a first-pass guess, not something Bernard specified — flagged in the
+ * a first-pass guess, not something the client specified — flagged in the
  * implementation plan as an open question. Easy to re-tune since every
  * input is an isolated, named penalty.
  */

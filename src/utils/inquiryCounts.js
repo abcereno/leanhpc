@@ -140,6 +140,34 @@ export function computeBureauProgress(grouped) {
 }
 
 /**
+ * Whether a client row (already carrying exp/tu/eq_completed and
+ * exp/tu/eq_na — from a `clients` select, not `grouped` classification
+ * data) is fully resolved: every bureau is either Complete OR N/A. Matches
+ * this file's own isFullyCompleted above, useClientActions.js's
+ * directBureauProgress, and the `update_client_completion_status` DB
+ * trigger's definition — all of which already treat an N/A bureau as done.
+ *
+ * A plain `exp_completed && tu_completed && eq_completed` check (ignoring
+ * _na) used to be duplicated across several call sites and silently
+ * disagreed with the definition above: a client fully resolved with one
+ * legitimately N/A bureau reads progress: 100% (isFullyCompleted counts na
+ * as done) but would never satisfy the strict AND-of-completed check, so it
+ * never showed as "Completed" — missing from completed-only filters, and
+ * (for AdminClientList.jsx/InquiryRemovalClientList.jsx's row coloring)
+ * stuck in whatever aging color its day count happened to fall into
+ * instead of turning green. ServiceClientList.jsx already carried a local,
+ * correctly-fixed copy of this same check (see its own isAllDone comment);
+ * this is that same definition, centralized so it can't drift again.
+ */
+export function allBureausResolved(client) {
+  return !!(
+    (client?.exp_completed || client?.exp_na) &&
+    (client?.tu_completed || client?.tu_na) &&
+    (client?.eq_completed || client?.eq_na)
+  );
+}
+
+/**
  * `grouped` is `{ experian, transunion, equifax }` — each an array of
  * inquiry items with a `.classification` field. Matches the shape already
  * used by useInquiriesThread.js's `grouped`, UploadReportForm.jsx's

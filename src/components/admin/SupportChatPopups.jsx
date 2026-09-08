@@ -28,6 +28,8 @@ import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import SupportChatThread from "../shared/support/SupportChatThread";
 import { fetchAdminThreads } from "../../utils/supportChat";
+import { useFloatingDock } from "../../context/FloatingDockContext";
+import { CORNER_OFFSET } from "../../utils/floatingDock";
 
 // Facebook caps how many threads stay expanded at once and minimizes the
 // rest rather than letting the row grow unbounded — same idea here, just
@@ -61,6 +63,20 @@ export default function SupportChatPopups() {
   const [threads, setThreads] = useState([]);
   const [showList, setShowList] = useState(false);
   const [recentThreads, setRecentThreads] = useState([]);
+  // Shared with the Pipeline (24h) queue widget (ClientSubmissionListener.jsx)
+  // — only one of the two can have its panel open at a time. See
+  // FloatingDockContext.jsx.
+  const { activePanel, openPanel } = useFloatingDock();
+
+  // If the Pipeline widget claims the dock, collapse every expanded thread
+  // and close the recent-list popover back to just the launcher — the
+  // persistent launcher button itself (and any minimized chat-head
+  // circles) stay visible regardless, only the big panels yield.
+  useEffect(() => {
+    if (activePanel === "chat") return;
+    setThreads((prev) => (prev.some((t) => t.expanded) ? prev.map((t) => ({ ...t, expanded: false })) : prev));
+    setShowList(false);
+  }, [activePanel]);
 
   const loadRecentThreads = useCallback(async () => {
     const { data } = await fetchAdminThreads();
@@ -87,6 +103,7 @@ export default function SupportChatPopups() {
         if (row.sender_type === "admin") return;
 
         const key = threadKey(row);
+        let isNewThread = false;
         setThreads((prev) => {
           const existingIndex = prev.findIndex((t) => t.key === key);
           if (existingIndex !== -1) {
@@ -95,6 +112,7 @@ export default function SupportChatPopups() {
             return next;
           }
 
+          isNewThread = true;
           const expandedCount = prev.filter((t) => t.expanded).length;
           const newThread = {
             key,
@@ -108,6 +126,18 @@ export default function SupportChatPopups() {
           };
           return [...prev, newThread];
         });
+
+        // A brand-new incoming thread claims the dock, auto-collapsing the
+        // Pipeline (24h) queue widget if it happened to be open — a live
+        // client/partner request shouldn't stay hidden behind it. It also
+        // closes the recent-list popover for the same reason toggleExpanded
+        // does: an auto-popped panel could otherwise land right underneath
+        // an already-open list. An update to an already-tracked thread just
+        // bumps its unread badge instead, same as before.
+        if (isNewThread) {
+          openPanel("chat");
+          setShowList(false);
+        }
 
         // Keeps the launcher's unread badge and recent-threads list in
         // sync immediately instead of waiting for the next poll.
@@ -126,12 +156,24 @@ export default function SupportChatPopups() {
       });
 
     return () => supabase.removeChannel(channel);
-  }, [user, canSeeSupport, loadRecentThreads]);
+  }, [user, canSeeSupport, loadRecentThreads, openPanel]);
 
   if (!canSeeSupport) return null;
 
   const toggleExpanded = (key) => {
     setThreads((prev) => prev.map((t) => (t.key === key ? { ...t, expanded: !t.expanded, unread: t.expanded ? t.unread : false } : t)));
+    const target = threads.find((t) => t.key === key);
+    if (target && !target.expanded) {
+      // Expanding a thread claims the dock (auto-collapses Pipeline if
+      // it's open) and closes the recent-threads list — the two used to
+      // be able to render at once, and since the list pops up directly
+      // above the launcher while panels sit in the row next to it, an
+      // open list would land right on top of whatever panel happened to
+      // be there. Only one floating surface shows at a time now, same
+      // reasoning as FloatingDockContext.jsx's cross-widget rule.
+      openPanel("chat");
+      setShowList(false);
+    }
   };
 
   const closeThread = (key) => {
@@ -146,6 +188,7 @@ export default function SupportChatPopups() {
       return [...prev, { key, clientId: t.clientId, companyId: t.companyId, ownerType: t.ownerType, ownerName: t.ownerName, expanded: true, unread: false }];
     });
     setShowList(false);
+    openPanel("chat");
   };
 
   const totalUnread = recentThreads.reduce((sum, t) => sum + t.unreadCount, 0);
@@ -153,7 +196,14 @@ export default function SupportChatPopups() {
   return (
     <div
       className="d-flex align-items-end"
-      style={{ position: "fixed", bottom: 16, right: 16, gap: 10, zIndex: 2000 }}
+      // The literal bottom-right corner, same as any other floating chat
+      // widget — CORNER_OFFSET is shared with ClientSubmissionListener.jsx's
+      // Pipeline widget (utils/floatingDock.js) so the two stack
+      // consistently. Not trying to dodge AdminLayout.jsx's pinned
+      // AppFooter here — the dock's mutual-exclusion logic above is what
+      // actually prevents this widget from blocking anything, not this
+      // offset.
+      style={{ position: "fixed", bottom: CORNER_OFFSET, right: 16, gap: 10, zIndex: 2000 }}
     >
       {/* Expanded threads render as the full panel — one per open,
           non-minimized conversation, stacking left of the launcher column. */}
@@ -204,11 +254,13 @@ export default function SupportChatPopups() {
         );
       })}
 
-      {/* Launcher column — minimized "chat head" circles stack directly
-          above the button (Messenger's own answer to a wall of pill
-          headers getting unreadable fast), while expanded panels stay in
-          the horizontal row to its left. */}
-      <div className="d-flex flex-column align-items-end" style={{ gap: 10 }}>
+      {/* Launcher column — minimized "chat heads" stack directly above the
+          button, Facebook Messenger's actual chat-heads style: bigger
+          circles (64px, not a small badge-sized dot), overlapping by
+          about a third, each with a colored ring standing in for a
+          profile photo since threads don't have one. Expanded panels stay
+          in the horizontal row to this column's left. */}
+      <div className="d-flex flex-column align-items-end" style={{ gap: 14 }}>
         {threads.filter((t) => !t.expanded).length > 0 && (
           <div className="d-flex flex-column align-items-center animate-fade-in">
             {threads.filter((t) => !t.expanded).map((t, i) => {
@@ -221,20 +273,22 @@ export default function SupportChatPopups() {
                   title={t.ownerName}
                   className="rounded-circle border-0 shadow-lg d-flex align-items-center justify-content-center position-relative flex-shrink-0"
                   style={{
-                    width: 48,
-                    height: 48,
-                    marginTop: i === 0 ? 0 : -14,
+                    width: 64,
+                    height: 64,
+                    marginTop: i === 0 ? 0 : -24,
                     background: typeStyle.color,
                     color: "#fff",
                     fontWeight: 700,
-                    border: "2px solid var(--bg-card, #151E32)",
+                    fontSize: "1.3rem",
+                    border: "3px solid var(--bg-card, #151E32)",
+                    boxShadow: `0 0 0 2px ${typeStyle.color}, 0 4px 10px rgba(0,0,0,0.4)`,
                   }}
                 >
                   {t.ownerName.charAt(0).toUpperCase()}
                   {t.unread && (
                     <span
                       className="rounded-circle position-absolute"
-                      style={{ width: 13, height: 13, background: "var(--accent-red, #EF4444)", bottom: -1, right: -1, border: "2px solid var(--bg-card, #151E32)" }}
+                      style={{ width: 16, height: 16, background: "var(--accent-red, #EF4444)", bottom: 0, right: 0, border: "3px solid var(--bg-card, #151E32)" }}
                     />
                   )}
                 </button>
@@ -250,10 +304,11 @@ export default function SupportChatPopups() {
             width: BUBBLE_WIDTH,
             maxHeight: 420,
             position: "absolute",
-            bottom: 68,
+            bottom: 72,
             right: 0,
             background: "var(--bg-card, #151E32)",
             border: "1px solid var(--border-color, #334155)",
+            borderTop: "3px solid var(--primary-blue, #0EA5E9)",
             transformOrigin: "bottom right",
             opacity: showList ? 1 : 0,
             transform: showList ? "translateY(0) scale(1)" : "translateY(12px) scale(0.96)",
@@ -261,8 +316,12 @@ export default function SupportChatPopups() {
             transition: "opacity 0.2s ease, transform 0.2s ease",
           }}
         >
-            <div className="px-3 py-2 fw-bold text-white" style={{ background: "var(--primary-blue, #0EA5E9)" }}>
-              <i className="bi bi-chat-dots-fill me-2" />Support Chat
+            {/* Same dark-card + colored-accent style as an expanded panel's
+                own header, not a solid banner — this list and a panel never
+                show at once anymore, but they should still read as the same
+                widget family when you flip between them. */}
+            <div className="px-3 py-2 fw-bold" style={{ borderBottom: "1px solid var(--border-color, #334155)" }}>
+              <i className="bi bi-chat-dots-fill me-2 text-primary" />Support Chat
             </div>
             <div style={{ overflowY: "auto" }}>
               {recentThreads.length === 0 ? (
@@ -295,11 +354,25 @@ export default function SupportChatPopups() {
             </div>
         </div>
 
+        {/* Rounded-square, not a circle — same silhouette Facebook uses for
+            its own chat-heads launcher button, deliberately distinct from
+            the round avatar heads stacked above it. */}
         <button
           type="button"
-          className="rounded-circle border-0 shadow-lg d-flex align-items-center justify-content-center position-relative"
-          style={{ width: 56, height: 56, background: "var(--primary-blue, #0EA5E9)" }}
-          onClick={() => { setShowList((prev) => !prev); if (!showList) loadRecentThreads(); }}
+          className="border-0 shadow-lg d-flex align-items-center justify-content-center position-relative"
+          style={{ width: 60, height: 60, borderRadius: 20, background: "var(--primary-blue, #0EA5E9)" }}
+          onClick={() => {
+            setShowList((prev) => !prev);
+            if (!showList) {
+              loadRecentThreads();
+              openPanel("chat");
+              // Same reasoning as toggleExpanded above, the other
+              // direction: opening the list collapses every expanded
+              // panel back to a head, so the list never has to render on
+              // top of one.
+              setThreads((prev) => (prev.some((t) => t.expanded) ? prev.map((t) => ({ ...t, expanded: false })) : prev));
+            }
+          }}
           title="Support Chat"
         >
           <i className={`bi ${showList ? "bi-chevron-down" : "bi-chat-dots-fill"} text-white fs-4`} />

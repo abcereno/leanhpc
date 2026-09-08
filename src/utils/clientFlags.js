@@ -49,7 +49,7 @@ export function deriveClientFlags(client) {
 
     // No dedicated "internal issue" column exists in the schema. Using
     // open (incomplete) company_tasks as the closest existing proxy —
-    // revisit this definition once/if Bernard defines "Internal Issues"
+    // revisit this definition once/if the client defines "Internal Issues"
     // more precisely.
     internalIssue: (client.pendingTasksCount || 0) > 0,
 

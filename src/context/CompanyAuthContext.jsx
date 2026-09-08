@@ -108,7 +108,12 @@ export const CompanyAuthProvider = ({ children }) => {
 
 export const useCompanyAuth = () => {
   const context = useContext(CompanyAuthContext);
-  if (context === undefined) {
+  // Was `=== undefined` — createContext(null) means a call outside the
+  // provider actually returns null, not undefined, so that check never
+  // fired and callers got a generic "cannot destructure property of null"
+  // crash instead of this hook's intended error message. Matches the
+  // working `if (!context)` pattern AuthContext.jsx's useAuth() already uses.
+  if (!context) {
     throw new Error("useCompanyAuth must be used within a CompanyAuthProvider");
   }
   return context;

@@ -1,8 +1,8 @@
 import React, { useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Container, Button, Spinner, Alert } from "react-bootstrap";
-import html2canvas from "html2canvas"; 
-import jsPDF from "jspdf"; 
+import { Container, Button, Spinner, Alert, Form } from "react-bootstrap";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 // Imports
 import { useProgressReportData } from "../../../hooks/useProgressReportData"; 
@@ -16,10 +16,37 @@ export default function ClientProgressPage() {
   const { addToast } = useToast();
   const { clientId } = useParams();
   const navigate = useNavigate();
-  
+
+  // Date-range picker — lets staff pin the Progress Report comparison to
+  // two specific snapshots instead of always earliest-vs-latest. Both
+  // stay null until staff pick something explicitly, which keeps the
+  // hook's original default behavior (earliest/latest) intact.
+  const [baselineDate, setBaselineDate] = useState(null);
+  const [currentDateSel, setCurrentDateSel] = useState(null);
+
   // Data Fetching
-  const { data, loading, error } = useProgressReportData(clientId);
-  
+  const { data, loading, error, availableDates } = useProgressReportData(clientId, {
+    baselineDate,
+    currentDate: currentDateSel,
+  });
+
+  // What the two selects should actually show as selected — falls back to
+  // the earliest/latest available date whenever staff haven't overridden
+  // that end, so the picker always reflects the report currently on
+  // screen rather than showing blank selects on first load.
+  const effectiveBaselineDate = baselineDate || availableDates[0] || "";
+  const effectiveCurrentDate = currentDateSel || availableDates[availableDates.length - 1] || "";
+  const hasCustomRange = !!baselineDate || !!currentDateSel;
+
+  const formatDateOption = (isoDate) => {
+    try {
+      const [y, m, d] = isoDate.split("-");
+      return new Date(Number(y), Number(m) - 1, Number(d)).toLocaleDateString();
+    } catch {
+      return isoDate;
+    }
+  };
+
   const [busy, setBusy] = useState(false);
   const [openPreview, setOpenPreview] = useState(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState(null); 
@@ -132,7 +159,7 @@ export default function ClientProgressPage() {
   return (
     <Container className="py-4 client-progress-page-root">
       {/* Actions Bar */}
-      <div className="d-flex justify-content-between mb-4 no-print">
+      <div className="d-flex justify-content-between mb-3 no-print">
         <h3 className="fw-bold">Progress Report</h3>
         <div className="d-flex gap-2">
             <Button variant="outline-secondary" onClick={() => navigate(-1)}>Back</Button>
@@ -144,6 +171,55 @@ export default function ClientProgressPage() {
             </Button>
         </div>
       </div>
+
+      {/* Snapshot Date Range — lets staff compare two specific pulls
+          instead of always earliest-vs-latest. Only meaningful once there
+          are at least 2 snapshots on record, which is already guaranteed
+          by this point (the loading/error guard above already returned
+          for clients with fewer than 2). */}
+      {availableDates.length >= 2 && (
+        <div className="d-flex flex-wrap align-items-end gap-3 mb-4 p-3 bg-light border rounded no-print">
+          <Form.Group style={{ minWidth: 200 }}>
+            <Form.Label className="small fw-bold text-muted text-uppercase mb-1">Baseline (Start)</Form.Label>
+            <Form.Select
+              size="sm"
+              value={effectiveBaselineDate}
+              onChange={(e) => setBaselineDate(e.target.value)}
+            >
+              {availableDates.map((d) => (
+                <option key={d} value={d}>{formatDateOption(d)}</option>
+              ))}
+            </Form.Select>
+          </Form.Group>
+          <Form.Group style={{ minWidth: 200 }}>
+            <Form.Label className="small fw-bold text-muted text-uppercase mb-1">Current</Form.Label>
+            <Form.Select
+              size="sm"
+              value={effectiveCurrentDate}
+              onChange={(e) => setCurrentDateSel(e.target.value)}
+            >
+              {availableDates.map((d) => (
+                <option key={d} value={d}>{formatDateOption(d)}</option>
+              ))}
+            </Form.Select>
+          </Form.Group>
+          {hasCustomRange && (
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={() => { setBaselineDate(null); setCurrentDateSel(null); }}
+            >
+              Reset to Full Range
+            </Button>
+          )}
+          {effectiveBaselineDate && effectiveCurrentDate && effectiveBaselineDate > effectiveCurrentDate && (
+            <span className="small text-danger">
+              <i className="bi bi-exclamation-triangle-fill me-1"></i>
+              Baseline is after Current — deleted/new labels will be reversed.
+            </span>
+          )}
+        </div>
+      )}
 
       {/* DOCUMENT VIEWER (SCREEN) */}
       <div className="report-viewer">

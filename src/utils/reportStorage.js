@@ -23,10 +23,58 @@ const NOTIFICATION_CONTENT = {
     reinserted_account: { title: "Account Reappeared", message: "A previously removed account has reappeared on your credit report." }
 };
 
+// The raw report's own "as-of" date — Sources.Source[0].InquiryDate is the
+// same field parseSmartCredit.js already relies on for its meta.audit_date
+// (see that file's "META" section), confirmed present on real pulls from
+// both providers this app imports from. Returns "YYYY-MM-DD" or null if
+// the raw report doesn't carry it, so callers can fall back to wall-clock
+// rather than crash on an unfamiliar/older report shape.
+export function extractReportDate(rawJson) {
+    const d = rawJson?.Sources?.Source?.[0]?.InquiryDate;
+    return d || null;
+}
+
+// Records a pointer into client_report_snapshots (sql/add_client_report_
+// snapshots.sql) for a snapshot that's already been written to Storage at
+// `storagePath` — see that migration's own comments for why this is a
+// separate table (email-keyed, survives dispute-round changes) rather than
+// just the per-client_id Storage listing useProgressReportData.js used to
+// rely on exclusively. Best-effort: a failure here (migration not run yet,
+// RLS, network) is logged and swallowed rather than thrown — this runs
+// after the actual report data is already safely saved, and shouldn't be
+// able to make that save look like it failed.
+export async function recordReportSnapshot(clientId, { reportDate, dateSource, storagePath, provider }) {
+    try {
+        const { data: clientRow } = await supabase.from("clients").select("email").eq("id", clientId).single();
+        const email = clientRow?.email ? String(clientRow.email).trim().toLowerCase() : null;
+        const { error } = await supabase.from("client_report_snapshots").upsert(
+            {
+                client_id: clientId,
+                email,
+                report_date: reportDate,
+                date_source: dateSource,
+                storage_path: storagePath,
+                provider: provider || null,
+            },
+            { onConflict: "client_id,report_date" }
+        );
+        if (error && !/does not exist/i.test(error.message || "")) {
+            console.warn("[reportStorage] Could not record report snapshot (run sql/add_client_report_snapshots.sql?):", error.message);
+        }
+    } catch (e) {
+        console.warn("[reportStorage] Unexpected error recording report snapshot:", e);
+    }
+}
+
 // --- 1. THE "SAFE UPDATE" FUNCTION ---
-export async function saveUpdateAudit(clientId, rawJson, auditReport) {
+export async function saveUpdateAudit(clientId, rawJson, auditReport, provider = null) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const dateKey = new Date().toISOString().split('T')[0]; 
+    // Prefers the raw report's own date over wall-clock — see
+    // extractReportDate above. Falling back to wall-clock here (instead of
+    // requiring it) keeps every existing report shape working exactly as
+    // before if the field isn't present.
+    const reportDate = extractReportDate(rawJson);
+    const dateKey = reportDate || new Date().toISOString().split('T')[0];
 
     // 👇 DELTA ANALYSIS ENGINE INTERCEPT 👇
     try {
@@ -100,6 +148,16 @@ export async function saveUpdateAudit(clientId, rawJson, auditReport) {
     // 4. Update Score History Log
     await updateScoreHistory(clientId, auditReport.scores, dateKey);
 
+    // 4b. Record this snapshot in client_report_snapshots so Progress
+    // Report can find it by email across dispute rounds — see
+    // recordReportSnapshot above.
+    await recordReportSnapshot(clientId, {
+        reportDate: dateKey,
+        dateSource: reportDate ? "report_date" : "wall_clock",
+        storagePath: snapshotPath,
+        provider,
+    });
+
     // 5. Stamp "last report update" — the real source of truth for Case
     // Management's Production Queue countdown (utils/aging.js's
     // getCaseManagementCountdown), which used to only have paid_at to go
@@ -124,8 +182,8 @@ export async function saveUpdateAudit(clientId, rawJson, auditReport) {
 // so this is just a named entry point for "first import" callers — kept
 // separate from saveUpdateAudit rather than merged so call sites stay
 // self-documenting about which case they're in.
-export async function saveInitialAudit(clientId, rawJson, auditReport) {
-    return saveUpdateAudit(clientId, rawJson, auditReport);
+export async function saveInitialAudit(clientId, rawJson, auditReport, provider = null) {
+    return saveUpdateAudit(clientId, rawJson, auditReport, provider);
 }
 
 // Helper for Score History 

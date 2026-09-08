@@ -92,3 +92,44 @@ This is now infrastructure HPC owns, unlike a managed proxy service:
 - Ubuntu security updates: `sudo apt update && sudo apt upgrade -y` periodically.
 - If the VPS is ever recreated/resized, its public IP will likely change — ConsumerDirect's whitelist and the `SMARTCREDIT_PROXY_URL` secret would both need updating.
 - If tinyproxy stops responding, `sudo systemctl status tinyproxy` / `sudo systemctl restart tinyproxy` on the VPS.
+
+## Troubleshooting: requests blocked even though the IP is whitelisted
+
+Confirmed with John O'Neill (2026-09-02, via Cloudflare's own ray-ID lookup on his end): ConsumerDirect only whitelisted the VPS's **IPv4** address (2.25.159.159). Most VPS providers also assign a public IPv6 address by default, and Ubuntu prefers IPv6 for outbound connections whenever both are available on the destination. tinyproxy was picking up that IPv6 address for its outbound connections to SmartCredit — an address ConsumerDirect never whitelisted — so Cloudflare blocked it and served the "Attention Required" challenge page instead of a real bot check. 22 clean requests went through on IPv4 between Aug 19–26; everything since switched to IPv6 and started failing.
+
+Fix: pin tinyproxy's outbound connections to the VPS's IPv4 address with the `Bind` directive, so this can't happen again regardless of what the OS's routing table prefers.
+
+```bash
+sudo nano /etc/tinyproxy/tinyproxy.conf
+```
+
+Add (using the VPS's own public IPv4 — the same one given to ConsumerDirect):
+
+```
+Bind 2.25.159.159
+```
+
+Restart it:
+
+```bash
+sudo systemctl restart tinyproxy
+```
+
+Verify from the VPS itself — both should now report the same IPv4 address:
+
+```bash
+curl -4 ifconfig.me
+curl ifconfig.me
+```
+
+Then run a real Fetch3bModal import for a test client and confirm it succeeds (a local curl test only proves tinyproxy is bound correctly, not that ConsumerDirect's firewall is happy — same caveat as step 5 above).
+
+Optional extra hardening, since this box exists only to proxy SmartCredit traffic and has no reason to originate anything over IPv6: disable IPv6 on the VPS entirely so no future service on it can repeat this mistake.
+
+```bash
+sudo bash -c 'cat >> /etc/sysctl.conf <<EOF
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+EOF'
+sudo sysctl -p
+```

@@ -16,7 +16,15 @@ import { useToast } from "../../../shared/ui/ToastNotifier";
 import { groupDisputableByBureau } from "../../../../utils/inquiryCounts";
 import { compileLetterHtml } from "../../../../utils/letterTemplate";
 import { generateLetterPdfBlob, downloadBlob, PAGE_WIDTH_IN, PAGE_MARGIN_IN, PAGE_HEIGHT_IN, LETTER_TYPOGRAPHY_CSS } from "../../../../utils/letterPdf";
-import { LETTER_TYPES, initialVariantIndex, nextVariantIndex, getVariantText } from "../../../../data/letterContentBank";
+import {
+  LETTER_TYPES,
+  initialVariantIndex,
+  nextVariantIndex,
+  getVariantText,
+  initialBannerIndex,
+  nextBannerIndex,
+  getBannerText,
+} from "../../../../data/letterContentBank";
 import { ASSET_KEYS, ASSET_LABELS, VALIDATION_BADGES } from "../../../../utils/documentAssetLabels";
 import { validateDocument } from "../../../../utils/validateDocument";
 
@@ -69,7 +77,12 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
   const [loadingClient, setLoadingClient] = useState(false);
   const [letterType, setLetterType] = useState(DEFAULT_LETTER_TYPE);
   const [letters, setLetters] = useState({}); // { bureau: html }
-  const [variantIndexes, setVariantIndexes] = useState({}); // { bureau: index into the active bank }
+  const [variantIndexes, setVariantIndexes] = useState({}); // { bureau: index into the active body bank }
+  // Separate from variantIndexes above — the banner assertion
+  // (letterContentBank.js's BANNER_ASSERTIONS) rotates independently of
+  // which letter type/body bank is selected, since it isn't part of
+  // LETTER_TYPES.
+  const [bannerIndexes, setBannerIndexes] = useState({}); // { bureau: index into BANNER_ASSERTIONS }
   const [activeBureau, setActiveBureau] = useState(null);
   const [clientInfo, setClientInfo] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -144,10 +157,11 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
   }, [editor, activeBureau, letters]);
 
   const compileForBureau = useCallback(
-    (clientRow, bureau, typeKey, variantIndex) => {
+    (clientRow, bureau, typeKey, variantIndex, bannerIndex) => {
       const list = byBureau[bureau] || [];
       const bodyText = getVariantText(typeKey, variantIndex);
-      return compileLetterHtml({ client: clientRow, bureau, inquiries: list, bodyText });
+      const bannerText = getBannerText(bannerIndex);
+      return compileLetterHtml({ client: clientRow, bureau, inquiries: list, bodyText, bannerText });
     },
     [byBureau]
   );
@@ -277,6 +291,7 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
     setLoadingClient(true);
     setLetters({});
     setVariantIndexes({});
+    setBannerIndexes({});
     setActiveBureau(null);
     loadAssetDocs();
     try {
@@ -301,14 +316,18 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
 
       const nextLetters = {};
       const nextIndexes = {};
+      const nextBannerIndexes = {};
       bureaus.forEach((bureau) => {
         const idx = initialVariantIndex(letterType, clientId, bureau);
+        const bannerIdx = initialBannerIndex(clientId, bureau);
         nextIndexes[bureau] = idx;
-        nextLetters[bureau] = compileForBureau(clientRow, bureau, letterType, idx);
+        nextBannerIndexes[bureau] = bannerIdx;
+        nextLetters[bureau] = compileForBureau(clientRow, bureau, letterType, idx, bannerIdx);
       });
 
       setLetters(nextLetters);
       setVariantIndexes(nextIndexes);
+      setBannerIndexes(nextBannerIndexes);
       setActiveBureau(bureaus[0]);
     } catch (err) {
       console.error("Letter generation failed:", err);
@@ -338,7 +357,11 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
     bureaus.forEach((bureau) => {
       const idx = initialVariantIndex(nextType, clientId, bureau);
       nextIndexes[bureau] = idx;
-      nextLetters[bureau] = compileForBureau(clientInfo, bureau, nextType, idx);
+      // Banner assertion isn't tied to letter type — reuse whatever
+      // index this bureau already has (falling back to the same
+      // deterministic starting index if it somehow isn't set yet).
+      const bannerIdx = bannerIndexes[bureau] ?? initialBannerIndex(clientId, bureau);
+      nextLetters[bureau] = compileForBureau(clientInfo, bureau, nextType, idx, bannerIdx);
     });
     setLetters(nextLetters);
     setVariantIndexes(nextIndexes);
@@ -347,13 +370,19 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
   // Cycles the active bureau's letter to the next version in the same
   // bank — no network call, since the content is a static, pre-approved
   // library (src/data/letterContentBank.js), not live-generated.
+  // Cycles BOTH the body paragraphs and the banner assertion together —
+  // "another version" should mean a genuinely different letter, not just
+  // different body wording with the same banner line every time.
   const handleTryAnotherVersion = () => {
     if (!activeBureau || !clientInfo) return;
     if (!window.confirm("Try another version of this letter? Any edits you've made will be lost.")) return;
     const currentIdx = variantIndexes[activeBureau] ?? 0;
     const idx = nextVariantIndex(letterType, currentIdx);
+    const currentBannerIdx = bannerIndexes[activeBureau] ?? 0;
+    const bannerIdx = nextBannerIndex(currentBannerIdx);
     setVariantIndexes((prev) => ({ ...prev, [activeBureau]: idx }));
-    setLetters((prev) => ({ ...prev, [activeBureau]: compileForBureau(clientInfo, activeBureau, letterType, idx) }));
+    setBannerIndexes((prev) => ({ ...prev, [activeBureau]: bannerIdx }));
+    setLetters((prev) => ({ ...prev, [activeBureau]: compileForBureau(clientInfo, activeBureau, letterType, idx, bannerIdx) }));
   };
 
   const handleSaveAll = async () => {

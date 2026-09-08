@@ -83,7 +83,6 @@ const CompanyPortalDashboard = () => {
   const [drawerStage, setDrawerStage] = useState(null); 
 
   // Global Data State
-  const [metrics, setMetrics] = useState({ total: 0, paid: 0, actionNeeded: 0, eligible: 0 });
   const [pipelineData, setPipelineData] = useState({
       awaitingPayment: [], awaitingDocs: [], pendingReview: [], processing: [], completed: [], eligible: []
   });
@@ -169,11 +168,6 @@ const CompanyPortalDashboard = () => {
             }
         }
 
-        const total = clientData.length;
-        const paid = clientData.filter(c => c.is_paid).length;
-        const eligible = clientData.filter(c => c.funding_status === 'GREEN').length;
-        const actionNeeded = clientData.filter(c => c.company_tasks?.some(t => !t.is_completed)).length;
-
         const pipeline = { awaitingPayment: [], awaitingDocs: [], pendingReview: [], processing: [], completed: [], eligible: [] };
 
         // DISTRIBUTE THE PIPELINE
@@ -218,7 +212,6 @@ const CompanyPortalDashboard = () => {
             if (client.funding_status === 'GREEN') pipeline.eligible.push(client);
         });
 
-        setMetrics({ total, paid, eligible, actionNeeded });
         setPipelineData(pipeline);
       } catch (err) {
         console.error("Failed to load dashboard metadata", err);
@@ -357,6 +350,13 @@ const CompanyPortalDashboard = () => {
         </Nav>
 
         <div className="mt-4 pt-3 border-top flex-shrink-0" style={{ borderColor: 'rgba(255,255,255,0.05) !important' }}>
+            {/* Previously only reachable via the now-deleted CompanyPortalNavibar.jsx
+                (dead, unused component) — this dashboard shell never had its own
+                link to the routed /profile page (password change, name edit), so
+                it was unreachable from the actual UI. */}
+            <div onClick={() => navigate(`/company-portal/${companyId}/profile`)} className="d-flex align-items-center rounded-3 p-2 px-3 cursor-pointer hover-bg-dark" style={{ transition: 'all 0.2s', fontWeight: '500', color: '#94a3b8' }}>
+                <i className="bi bi-person-gear me-3 fs-5"></i> Edit Profile
+            </div>
             <div onClick={handleLogout} className="d-flex align-items-center rounded-3 p-2 px-3 cursor-pointer" style={{ transition: 'all 0.2s', fontWeight: '500', color: '#f87171' }}>
                 <i className="bi bi-box-arrow-right me-3 fs-5"></i> Sign Out
             </div>
@@ -421,7 +421,7 @@ const CompanyPortalDashboard = () => {
 
             {currentView === 'overview' && !dashboardError && (
                 <div className="animate-fade-in h-100 overflow-auto custom-scrollbar">
-                    <DashboardOverview refreshKey={refreshKey} metrics={metrics} pipelineData={pipelineData} openDrawer={openDrawer} handleOpenSummary={handleOpenSummary} />
+                    <DashboardOverview pipelineData={pipelineData} openDrawer={openDrawer} handleOpenSummary={handleOpenSummary} />
                 </div>
             )}
 
@@ -472,7 +472,7 @@ const CompanyPortalDashboard = () => {
             )}
 
             {currentView === 'vision_board' && (
-                <div className="animate-fade-in h-100 overflow-auto custom-scrollbar"><CompanyVisionBoard clientId={user?.id} /></div>
+                <div className="animate-fade-in h-100 overflow-auto custom-scrollbar"><CompanyVisionBoard clientId={user?.id} onSubmitClient={() => setShowAddClientModal(true)} onViewTracker={() => setCurrentView('clients')} /></div>
             )}
 
 

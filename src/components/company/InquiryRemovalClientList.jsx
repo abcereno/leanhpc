@@ -8,6 +8,9 @@ import ClientSummaryModal from '../admin/client-profile/modals/ClientSummaryModa
 import { resolveServiceId, serviceLabel } from '../../utils/services';
 import { standardizeAgentName, fetchCompanyAgents } from '../../utils/agentDisplay';
 import AgentAssignSelect from './AgentAssignSelect';
+import { getHolidays, calculatePaidRunningDays } from '../../utils/dateHelpers';
+import { getAgingRowClass } from '../../utils/aging';
+import { allBureausResolved } from '../../utils/inquiryCounts';
 
 export default function InquiryRemovalClientList({ refreshKey, onCheckEligibility }) {
   const { companyId, isAgent, isCompanyAdmin, user, loading: companyLoading, error: companyError } = useCompanyAuth();
@@ -18,6 +21,7 @@ export default function InquiryRemovalClientList({ refreshKey, onCheckEligibilit
   const [agentsList, setAgentsList] = useState([]); // Same roster as { id, full_name }, for the assign picker
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [holidaySet, setHolidaySet] = useState(new Set());
 
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -49,6 +53,13 @@ export default function InquiryRemovalClientList({ refreshKey, onCheckEligibilit
     )));
   };
 
+  // Same holiday set AdminClientList.jsx uses for its own aging colors —
+  // see utils/dateHelpers.js#getHolidays (cached module-wide, so this is
+  // a no-op fetch on every subsequent mount across the app).
+  useEffect(() => {
+    getHolidays().then(setHolidaySet);
+  }, []);
+
   useEffect(() => {
     if (companyLoading) { setLoading(false); return; }
     if (companyError || !companyId) {
@@ -70,7 +81,7 @@ export default function InquiryRemovalClientList({ refreshKey, onCheckEligibilit
         const CLIENT_FIELDS = `
             id, full_name, email, status_stage, created_at,
             dispute_method, service_id, counter, start_inquiries, start_date,
-            is_paid, paid_at, date_completed, is_paused,
+            is_paid, paid_at, date_completed, is_paused, paused_at, paused_days_total,
             exp_na, tu_na, eq_na,
             exp_completed, tu_completed, eq_completed,
             agent,
@@ -178,7 +189,11 @@ export default function InquiryRemovalClientList({ refreshKey, onCheckEligibilit
   const filteredClients = useMemo(() => {
     return clients.filter(c => {
       if (search && !c.full_name.toLowerCase().includes(search.toLowerCase())) return false;
-      const allCompleted = !!(c.exp_completed && c.tu_completed && c.eq_completed);
+      // N/A-inclusive — see utils/inquiryCounts.js#allBureausResolved. The
+      // old strict AND-of-completed check dropped a client from this
+      // filter entirely if they had a legitimately N/A bureau, even once
+      // fully resolved.
+      const allCompleted = allBureausResolved(c);
 
       // No "paid"/"unpaid" options anymore — every row here is already
       // paid (see the fetch filter above), unpaid leads are on New Leads.
@@ -250,16 +265,21 @@ export default function InquiryRemovalClientList({ refreshKey, onCheckEligibilit
           {filteredClients.length > 0 ? (
             filteredClients.map((client) => {
               const progressPercent = client.progress || 0;
-              const allCompleted = !!(client.exp_completed && client.tu_completed && client.eq_completed);
+              const allCompleted = allBureausResolved(client);
+              // Business days in production, pause-aware (freezes while
+              // is_paused) — same calculation AdminClientList.jsx uses,
+              // via the shared dateHelpers.js#calculatePaidRunningDays.
+              const paidBizDays = calculatePaidRunningDays(client, holidaySet);
+              const rowClass = getAgingRowClass(paidBizDays, { allCompleted, isPaused: client.is_paused });
               return (
-                <tr key={client.id} className={allCompleted ? "table-success" : ""}>
+                <tr key={client.id} className={rowClass}>
                   <td>
                     <div className="d-flex flex-column">
                       <div className="d-flex align-items-center">
                         <span className="fw-bold">{client.full_name}</span>
                         {client.pendingCount > 0 && <Badge bg="danger" pill className="ms-2"><i className="bi bi-bell-fill"></i> {client.pendingCount}</Badge>}
                       </div>
-                      <small className="text-muted">{serviceLabel(client)} • Inq: {client.start_inquiries || "N/A"}</small>
+                      <small className="text-muted">{serviceLabel(client)} • {paidBizDays}d • Inq: {client.start_inquiries || "N/A"}</small>
                     </div>
                   </td>
                   <td>

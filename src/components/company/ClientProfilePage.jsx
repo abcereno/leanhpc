@@ -27,8 +27,10 @@ import SignatureCanvas from 'react-signature-canvas';
 import Fetch3BModal from "../admin/client-profile/modals/Fetch3bModal";
 import ParseReportModal from "../admin/client-profile/modals/ParseRreportModal";
 import EditContactInfoModal from "./EditContactInfoModal";
+import CompanyClientTasks from "./CompanyClientTasks";
 
-const ONBOARDING_BUCKET = "onboarding-documents"; 
+const ONBOARDING_BUCKET = "onboarding-documents";
+const DEFAULT_REQ_CHECKS = { idProvided: false, poaProvided: false, ssnProvided: false, monitoringActive: false };
 
 // 👇 UPDATED: FormatNotes now detects and renders image links as actual images 👇
 const FormatNotes = ({ notes }) => {
@@ -105,9 +107,36 @@ export default function ClientProfilePage() {
   };
 
   const clientBlock = (normalized && normalized.clientBlock) || {};
-  const [reqChecks, setReqChecks] = useState({
-    idProvided: false, poaProvided: false, ssnProvided: false, monitoringActive: false,
-  });
+  const [reqChecks, setReqChecks] = useState(DEFAULT_REQ_CHECKS);
+
+  // Was local-only state — every tick reset to blank on the next reload.
+  // Seed from clients.partner_docs_checklist (sql/add_partner_docs_checklist.sql)
+  // once the client row loads, so a partner's progress actually survives a
+  // refresh or coming back to this profile later.
+  useEffect(() => {
+    if (client?.partner_docs_checklist) {
+      setReqChecks({ ...DEFAULT_REQ_CHECKS, ...client.partner_docs_checklist });
+    }
+  }, [client?.partner_docs_checklist]);
+
+  const handleReqChecksChange = async (next) => {
+    setReqChecks(next);
+    const { error: checklistErr } = await supabase
+      .from("clients")
+      .update({ partner_docs_checklist: next })
+      .eq("id", clientId);
+    if (checklistErr) {
+      // Defensive: sql/add_partner_docs_checklist.sql may not have run yet
+      // in this environment — degrade to local-only rather than throwing,
+      // same fallback pattern used elsewhere in this codebase.
+      if (/partner_docs_checklist/i.test(checklistErr.message || "")) {
+        console.warn("clients.partner_docs_checklist not found (run sql/add_partner_docs_checklist.sql) — checklist won't persist yet.");
+      } else {
+        console.error("Failed to save docs checklist:", checklistErr);
+        addToast({ title: "Checklist Not Saved", message: checklistErr.message, variant: "warning", icon: "bi-exclamation-triangle-fill" });
+      }
+    }
+  };
 
   const handleConfirmInquiries = (selectedInquiries) => {
     setStagedInquiries(selectedInquiries);
@@ -263,6 +292,12 @@ export default function ClientProfilePage() {
               <FormatNotes notes={client.recent_apps_notes} />
             </Alert>
           )}
+
+          {/* The list view's "🔔 N" pending-task badge (InquiryRemovalClientList.jsx /
+              ServiceClientList.jsx) had nowhere partners could actually read what
+              those admin-assigned tasks say — this component existed but was never
+              rendered anywhere. Renders nothing itself if there are no tasks. */}
+          <CompanyClientTasks clientId={clientId} />
         </Col>
       </Row>
 
@@ -327,7 +362,7 @@ export default function ClientProfilePage() {
           <Card className="shadow-sm border-0">
             <Card.Header className="bg-white"><h5 className="mb-0 fw-bold">Required Documents Checklist</h5></Card.Header>
             <Card.Body className="bg-light">
-              <RequiredDocsChecklist value={reqChecks} onChange={(next) => setReqChecks(next)} />
+              <RequiredDocsChecklist value={reqChecks} onChange={handleReqChecksChange} />
               <div className="small text-muted mt-3"><i className="bi bi-lightbulb-fill text-warning me-1"></i>Tip: Upload assets above. Once uploaded, tick items here for quick tracking.</div>
             </Card.Body>
           </Card>

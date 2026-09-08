@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Row, Col, Spinner, Button, Modal, Form } from "react-bootstrap";
 import { supabase } from "../../supabaseClient";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useCompanyAuth } from "../../context/CompanyAuthContext";
 
 // Placeholder images for the static aesthetic parts of the board
 const AESTHETIC_IMAGES = {
@@ -26,26 +27,51 @@ const extractStoragePath = (publicUrl) => {
     return null;
 };
 
-export default function CompanyVisionBoard({ clientId }) {
+// Weekly To-Do / Core Focus used to be hardcoded arrays with local-only
+// toggle state — every checkbox reset on the next reload, and every partner
+// saw the exact same starter items regardless of what they'd actually done.
+// No table backs this widget yet (it's a personal checklist, not core
+// business data), so it's persisted to localStorage per company-portal user
+// (keyed by clientId, same id this component already scopes vision_board
+// images to) rather than adding a migration for it.
+const DEFAULT_TODOS = [
+    { id: 1, text: "Submit all client intake forms", is_completed: false },
+    { id: 2, text: "Approve pending invoices", is_completed: false },
+    { id: 3, text: "Review completed deletions", is_completed: false },
+    { id: 4, text: "Follow up with new leads", is_completed: false }
+];
+
+const DEFAULT_CORE_FOCUS = [
+    { id: 1, text: "Set this month's client volume goal", is_completed: false },
+    { id: 2, text: "Review current pipeline", is_completed: false },
+    { id: 3, text: "Follow up with leads awaiting payment", is_completed: false }
+];
+
+const loadChecklist = (storageKey, fallback) => {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+export default function CompanyVisionBoard({ clientId, onSubmitClient, onViewTracker }) {
   const { addToast } = useToast();
+  const { companyId, isAgent, user } = useCompanyAuth();
   const [boardImages, setBoardImages] = useState(DEFAULT_VISION_IMAGES);
   const [loading, setLoading] = useState(true);
-  
+
+  // Real client counts, replacing the hardcoded "22 clients this month" /
+  // "14 CLIENTS" / "21+ MORE TO INNER CIRCLE" figures that used to be shown
+  // to every partner as if they were that partner's actual numbers.
+  const [clientStats, setClientStats] = useState({ newThisMonth: 0, totalActive: 0, loaded: false });
+
   const [uploadModal, setUploadModal] = useState({ show: false, slot: null, file: null });
   const [savingUpload, setSavingUpload] = useState(false);
 
-  const [todos, setTodos] = useState([
-      { id: 1, text: "Submit all client intake forms", is_completed: true },
-      { id: 2, text: "Approve pending invoices", is_completed: true },
-      { id: 3, text: "Review completed deletions", is_completed: false },
-      { id: 4, text: "Follow up with 5 leads", is_completed: false }
-  ]);
-
-  const [coreFocus, setCoreFocus] = useState([
-      { id: 1, text: "Client Volume Goal This Month: ___", is_completed: true },
-      { id: 2, text: "Current Tier: Elite", is_completed: true },
-      { id: 3, text: "Next Tier Milestone: 21+ more clients to reach Inner Circle", is_completed: false }
-  ]);
+  const [todos, setTodos] = useState(() => loadChecklist(`vision_todos_${clientId}`, DEFAULT_TODOS));
+  const [coreFocus, setCoreFocus] = useState(() => loadChecklist(`vision_corefocus_${clientId}`, DEFAULT_CORE_FOCUS));
 
   const fetchDashboardData = async () => {
     if (!clientId) {
@@ -80,6 +106,46 @@ export default function CompanyVisionBoard({ clientId }) {
   useEffect(() => {
     fetchDashboardData();
   }, [clientId]);
+
+  useEffect(() => {
+    if (!companyId) return;
+
+    const fetchClientStats = async () => {
+      try {
+        let q = supabase
+          .from('clients')
+          .select('id, created_at, is_paid, date_completed')
+          .eq('company_id', companyId);
+        if (isAgent && user?.id) q = q.eq('agent_id', user.id);
+
+        const { data, error } = await q;
+        if (error) throw error;
+
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const newThisMonth = (data || []).filter((c) => new Date(c.created_at) >= monthStart).length;
+        const totalActive = (data || []).filter((c) => c.is_paid && !c.date_completed).length;
+
+        setClientStats({ newThisMonth, totalActive, loaded: true });
+      } catch (err) {
+        console.error("Error fetching vision board client stats:", err);
+      }
+    };
+
+    fetchClientStats();
+  }, [companyId, isAgent, user?.id]);
+
+  // Persist checklist toggles — see loadChecklist()/DEFAULT_TODOS above for
+  // why this is localStorage rather than a DB table.
+  useEffect(() => {
+    if (!clientId) return;
+    try { localStorage.setItem(`vision_todos_${clientId}`, JSON.stringify(todos)); } catch { /* best-effort */ }
+  }, [todos, clientId]);
+
+  useEffect(() => {
+    if (!clientId) return;
+    try { localStorage.setItem(`vision_corefocus_${clientId}`, JSON.stringify(coreFocus)); } catch { /* best-effort */ }
+  }, [coreFocus, clientId]);
 
   const openUploadModal = (slotKey) => {
       setUploadModal({ show: true, slot: slotKey, file: null });
@@ -245,38 +311,31 @@ export default function CompanyVisionBoard({ clientId }) {
                     <Col xs={3}>
                         <div className="stat-box">
                             <div className="stat-box-label">CLIENTS THIS MONTH</div>
-                            <div className="stat-box-val text-neon-blue">22</div>
+                            <div className="stat-box-val text-neon-blue">{clientStats.loaded ? clientStats.newThisMonth : <Spinner animation="border" size="sm" />}</div>
                         </div>
                     </Col>
                 </Row>
-                
+
+                {/* TOTAL EARNED / "clients away from Inner Circle" / tier-progress
+                    boxes used to show a hardcoded "$" and fabricated "21 clients
+                    away" countdown to every partner as if it were their real,
+                    personal progress — there's no revenue-per-partner or tier
+                    tracking in the schema to back either claim. Replaced with one
+                    real, derivable number (active paid clients) instead of
+                    inventing a substitute metric for the ones with no data behind
+                    them. */}
                 <Row className="g-2 mb-3">
-                    <Col xs={4}>
+                    <Col xs={12}>
                         <div className="stat-box">
-                            <div className="stat-box-label">TOTAL EARNED</div>
-                            <div className="stat-box-val text-start text-success">$</div>
-                        </div>
-                    </Col>
-                    <Col xs={4}>
-                        <div className="stat-box" style={{background: '#111'}}>
-                            <div className="small text-muted mb-1">YOU'RE <strong className="text-white">CLIENTS</strong> AWAY FROM</div>
-                            <div className="text-neon-blue fw-bold">INNER CIRCLE</div>
-                        </div>
-                    </Col>
-                    <Col xs={4}>
-                        <div className="stat-box">
-                            <div className="stat-box-label">NEXT TIER PROGRESS</div>
-                            <div className="circle-badge neon mt-2 mb-2" style={{width: '60px', height: '60px', fontSize: '0.8rem'}}>INNER<br/>CIRCLE</div>
-                            <div className="small text-neon-blue fw-bold">21 CLIENTS AWAY</div>
-                            <div className="stat-box-label mt-1" style={{fontSize: '0.6rem'}}>FROM INNER CIRCLE</div>
+                            <div className="stat-box-label">ACTIVE CLIENTS</div>
+                            <div className="stat-box-val text-neon-blue">{clientStats.loaded ? clientStats.totalActive : <Spinner animation="border" size="sm" />}</div>
                         </div>
                     </Col>
                 </Row>
 
                 <Row className="g-2">
-                    <Col><button className="action-btn w-100">SUBMIT CLIENT</button></Col>
-                    <Col><button className="action-btn w-100">VIEW TRACKER</button></Col>
-                    <Col><button className="action-btn w-100">ADD TOKENS</button></Col>
+                    <Col><button type="button" className="action-btn w-100" onClick={() => onSubmitClient?.()} disabled={!onSubmitClient}>SUBMIT CLIENT</button></Col>
+                    <Col><button type="button" className="action-btn w-100" onClick={() => onViewTracker?.()} disabled={!onViewTracker}>VIEW TRACKER</button></Col>
                 </Row>
             </div>
 
@@ -331,13 +390,15 @@ export default function CompanyVisionBoard({ clientId }) {
                     <div className="d-flex justify-content-between px-3 position-relative">
                         <div className="roadmap-node text-white border-secondary">ELITE</div>
                         <div className="roadmap-node text-muted border-secondary" style={{fontSize: '0.55rem'}}>SYNDICATE</div>
-                        <div className="position-absolute w-100 text-center text-muted" style={{top: '20px', left: 0, fontSize: '0.6rem'}}>+21 MORE<br/>TO INNER CIRCLE</div>
                     </div>
                 </div>
 
-                <div className="small text-muted mb-2">14 CLIENTS</div>
-                <h5 className="fw-bold text-white">21+ <span className="text-muted">TO ENTER</span></h5>
-                <h5 className="fw-bold text-neon-blue">THE INNER CIRCLE</h5>
+                {/* The specific "+21 more to Inner Circle" countdown was
+                    fabricated — there's no tier-threshold table backing it.
+                    Showing the one real number available (active client
+                    count) instead of inventing distance-to-tier math. */}
+                <div className="small text-muted mb-2">ACTIVE CLIENTS</div>
+                <h5 className="fw-bold text-white">{clientStats.loaded ? clientStats.totalActive : <Spinner animation="border" size="sm" />}</h5>
             </div>
 
             {/* Affirmations Sticky */}
@@ -407,10 +468,10 @@ export default function CompanyVisionBoard({ clientId }) {
               </Col>
           </Row>
           <div className="text-center py-3">
-              <div className="text-muted small fw-bold mb-1" style={{letterSpacing: '2px'}}>THIS TIER WILL HELP YOU</div>
+              <div className="text-muted small fw-bold mb-1" style={{letterSpacing: '2px'}}>KEEP GOING</div>
               <h4 className="fw-bold text-white m-0 d-flex justify-content-center align-items-center gap-3">
-                  <i className="bi bi-brightness-alt-high-fill text-neon-blue fs-5"></i> 
-                  <span>21 CLIENTS AWAY FROM <span className="text-neon-blue">INNER CIRCLE.</span></span>
+                  <i className="bi bi-brightness-alt-high-fill text-neon-blue fs-5"></i>
+                  <span>{clientStats.loaded ? clientStats.totalActive : "…"} ACTIVE <span className="text-neon-blue">CLIENTS.</span></span>
                   <i className="bi bi-brightness-alt-high-fill text-neon-blue fs-5"></i>
               </h4>
           </div>

@@ -555,7 +555,17 @@ allTradelines.forEach(tl => {
     const historyString = getValue(tl.GrantedTrade?.PayStatusHistory?.status) || "";
     const dateOpened = getValue(tl.dateOpened);
     const dateReported = getValue(tl.dateReported);
-    
+
+    // Authorized-user flag — same raw field and regex as parseSmartCredit.js's
+    // isAU (src/utils/parseSmartCredit.js:359), which funderRules.js's
+    // openRevolvingCount filter requires (a.is_au === false) to count an
+    // account as the client's own revolving credit. This parser never set it,
+    // so that count was always 0 and funding_status computed off this
+    // parser's output (useInquiriesThread.js) could never legitimately
+    // reach GREEN.
+    const designator = getValue(tl.AccountDesignator?.description) || getValue(tl.AccountDesignator?.abbreviation) || "";
+    const isAU = /authorized|participant/i.test(designator);
+
     const balance = parseMoney(tl.currentBalance);
     const limit = parseMoney(tl.GrantedTrade?.CreditLimit || tl.creditLimit || tl.highBalance);
     const monthlyPayment = parseMoney(tl.GrantedTrade?.monthlyPaymentAmount || tl.monthlyPayment);
@@ -705,6 +715,8 @@ allTradelines.forEach(tl => {
         is_settled: isSettled,
         is_negative: isNegative,
         is_positive: isStrictPositive,
+        is_au: isAU,
+        ownership: designator,
         tags: tags,
         utilization_pct: utilPct,
         utilization_status: utilStatus,

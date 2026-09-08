@@ -25,6 +25,8 @@
 // round-trips back out through editor.getHTML() when the letter is
 // saved/rendered to PDF, so whatever the staff sees in the editor is
 // exactly what gets saved.
+import { BANNER_ASSERTIONS } from "../data/letterContentBank";
+
 export const BUREAU_ADDRESSES = {
   Equifax: ["P.O. Box 740256", "Atlanta, GA 30374"],
   Experian: ["P.O. Box 4500", "Allen, TX 75013"],
@@ -32,15 +34,9 @@ export const BUREAU_ADDRESSES = {
 };
 
 // Cycled across the bank paragraphs (purple/magenta/cyan, per the source
-// doc's explicit instruction) and also used for the fixed banner-page
-// assertion below.
+// doc's explicit instruction) and also used for the banner-page assertion
+// below.
 const COLOR_ROTATION = ["#7C1FA0", "#C2007F", "#0891B2"]; // purple, magenta, cyan
-
-// Structural legitimacy assertion for the banner page — independent of
-// which content-bank letter type is chosen below, so it stays fixed
-// rather than rotating with the body wording.
-const BANNER_ASSERTION =
-  "I am the person named on this credit file contacting you directly — this is not a form letter from a credit repair company. I did not authorize the inquiries listed in this letter and am requesting their removal, along with documentation proving permissible purpose bearing my signature.";
 
 function esc(str) {
   return String(str ?? "")
@@ -71,7 +67,13 @@ function maskSsn(ssn) {
 // wording. Each paragraph gets its own color, cycling through
 // COLOR_ROTATION, matching the source doc's "purple, magenta and cyan"
 // instruction rather than only ever using two fixed colors.
-export function compileLetterHtml({ client, bureau, inquiries, bodyText }) {
+//
+// `bannerText` is likewise one entry from letterContentBank.js's
+// BANNER_ASSERTIONS bank (see that file for why this used to be a single
+// fixed string here) — defaults to that bank's first entry so any caller
+// that doesn't pass one explicitly still gets the original wording,
+// rather than an empty banner.
+export function compileLetterHtml({ client, bureau, inquiries, bodyText, bannerText }) {
   const { street, cityStateZip } = splitAddress(client?.address);
   const bureauAddress = BUREAU_ADDRESSES[bureau] || ["", ""];
   const letterDate = new Date().toLocaleDateString("en-US");
@@ -94,7 +96,7 @@ export function compileLetterHtml({ client, bureau, inquiries, bodyText }) {
 <div class="letter-page letter-banner">
   <p style="text-align:center;font-weight:bold;font-size:14pt;margin-bottom:4px;">This is an actual person, NOT a third party</p>
   <p style="text-align:center;font-weight:bold;font-size:13pt;margin-bottom:16px;">ATTENTION ${esc(bureau)}</p>
-  <p><span style="color:${COLOR_ROTATION[0]}">${esc(BANNER_ASSERTION)}</span></p>
+  <p><span style="color:${COLOR_ROTATION[0]}">${esc(bannerText || BANNER_ASSERTIONS[0])}</span></p>
 </div>
 <div class="letter-page letter-body">
   <p>${esc(fullName)}<br/>${esc(street)}<br/>${esc(cityStateZip)}<br/>Date of Birth: ${esc(client?.dob || "")}<br/>SSN: ${esc(maskSsn(client?.ssn))}</p>

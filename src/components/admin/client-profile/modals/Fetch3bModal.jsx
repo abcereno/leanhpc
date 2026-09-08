@@ -6,7 +6,6 @@ import { getEasternDateString } from "../../../../utils/timezone";
 import useLogger from "../../../../hooks/useLogger";
 import { useToast } from "../../../shared/ui/ToastNotifier";
 import { computeBureauProgress } from "../../../../utils/inquiryCounts";
-import { classifyInquiries } from "../../../../utils/classifyInquiries";
 import { saveInitialAudit } from "../../../../utils/reportStorage";
 import { runAuditEngine } from "../../../../utils/auditEngine";
 import { buildThreadFromAudit } from "../../../../utils/buildThreadFromAudit";
@@ -267,19 +266,10 @@ export default function Fetch3BModal({
         const auditResult = runAuditEngine(rawData);
         const data = buildThreadFromAudit(auditResult);
 
-        // Admin-side initial import, so run this through the same AI
-        // classifier SmartIdiQModal.jsx's quick-add flow already uses —
-        // lands pre-classified instead of forcing a full manual pass in
-        // the thread editor. See utils/classifyInquiries.js for the
-        // never-throws fallback behavior.
-        setStatusMessage("Classifying inquiries…");
-        const classified = await classifyInquiries({
-          accounts: data.accounts,
-          experian: data.experian,
-          transunion: data.transunion,
-          equifax: data.equifax,
-        });
-
+        // Classification (AI classifier) is intentionally OCR-only
+        // (UploadReportForm.jsx) — this import path lands everything
+        // "non-linked" via the addId fallback below, same as a plain
+        // intake import, and gets classified manually in the thread editor.
         const addId = (item) => ({
             ...item,
             id: item.id || generateId(),
@@ -287,9 +277,9 @@ export default function Fetch3BModal({
         });
 
         const accountsWithIds = (data.accounts || []).map(addId);
-        const expWithIds = (classified.experian || []).map(addId);
-        const tuWithIds = (classified.transunion || []).map(addId);
-        const eqWithIds = (classified.equifax || []).map(addId);
+        const expWithIds = (data.experian || []).map(addId);
+        const tuWithIds = (data.transunion || []).map(addId);
+        const eqWithIds = (data.equifax || []).map(addId);
 
         const threadPayload = {
           accounts: accountsWithIds,
@@ -332,7 +322,7 @@ export default function Fetch3BModal({
         // parts of an initial import, so a failure here shouldn't block it.
         if (rawData) {
           try {
-            await saveInitialAudit(clientId, rawData, analysis);
+            await saveInitialAudit(clientId, rawData, analysis, "SmartCredit");
           } catch (auditErr) {
             console.warn("⚠️ Could not save initial audit snapshot:", auditErr);
           }

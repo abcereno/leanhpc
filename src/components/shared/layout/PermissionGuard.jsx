@@ -8,7 +8,7 @@ import { ALL_PERMISSION_KEYS, PERMISSION_LABELS } from "../../../utils/permissio
  * Route gate based on granular permissions (profiles.permissions) instead
  * of a hard-coded role allowlist — replaces RoleGuard.jsx. See
  * utils/permissions.js for what each key means and utils/permissionPresets.js
- * for the bundles Bernard picks from when creating an employee.
+ * for the bundles the client picks from when creating an employee.
  *
  * - `permissions`: keys required to view this route/section. Leave empty to
  *   mean "any permission at all" — used for the outer admin-shell wrapper,

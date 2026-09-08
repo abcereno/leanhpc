@@ -38,7 +38,10 @@ function chunk(arr, size) {
  * first error encountered (if any) alongside whatever data did come back,
  * so callers can log/degrade the same way they would for a single request.
  */
-async function fetchChunked(ids, queryFn) {
+// Exported so other bulk `.in("client_id", ids)` fetches outside this file
+// (e.g. utils/nextStepTag.js) hit the same 150-id chunking instead of each
+// needing to remember/duplicate the 400-Bad-Request reasoning above.
+export async function fetchChunked(ids, queryFn) {
   if (!ids.length) return { data: [], error: null };
   const chunks = chunk(ids, ID_CHUNK_SIZE);
   const results = await Promise.all(chunks.map((c) => queryFn(c)));

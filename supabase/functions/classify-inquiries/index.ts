@@ -313,6 +313,13 @@ Make sure:
 - Do not change or remove any inquiries — just classify them
 - Fix malformed or OCR-damaged dates before classifying (e.g., 7112/2024 → 07/12/2024, 71/12/2024 → 07/12/2024)
 
+Return ONLY valid JSON, no commentary, in exactly this shape (same inquiries you were given, each with "classification" now filled in):
+{
+  "experian": [ { "date": "MM/DD/YYYY", "creditor": "NAME", "classification": "linked" } ],
+  "transunion": [ ... ],
+  "equifax": [ ... ]
+}
+
 Accounts:
 ${JSON.stringify(accounts, null, 2)}
 

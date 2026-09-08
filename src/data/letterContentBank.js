@@ -192,9 +192,28 @@ export const LETTER_TYPES = {
   identity_theft: { label: "Identity Theft Escalation", bank: IDENTITY_THEFT_LETTERS },
 };
 
+// Banner-page "this is a real person, not a form letter" assertion — used
+// to be a single fixed string in letterTemplate.js's BANNER_ASSERTION,
+// identical on every letter regardless of client, bureau, or round. That
+// was the one piece of every generated letter guaranteed to be word-for-
+// word the same as the last one, which is exactly what this bank exists
+// to fix (per the client's explicit ask: "do not make the same letter
+// that used previously"). Rotated the same way the body content is,
+// below.
+//
+// [0] is letterTemplate.js's original wording, kept as the default/
+// fallback so nothing changes for any code path that doesn't pass a
+// bannerText. [1] and [2] are the client's own wording, given directly as
+// an "example" + its "revise" — added verbatim, no wording invented here
+// (same rule the body banks above follow).
+export const BANNER_ASSERTIONS = [
+  "I am the person named on this credit file contacting you directly — this is not a form letter from a credit repair company. I did not authorize the inquiries listed in this letter and am requesting their removal, along with documentation proving permissible purpose bearing my signature.",
+  "I am writing to formally dispute the hard inquiries listed below that appear on my credit report. I am the consumer identified on this credit file, and I am submitting this dispute directly and personally, not through a credit repair organization or any other third party.",
+  "I am submitting this dispute directly and personally as the consumer identified above, not through a third party.",
+];
+
 // Cheap, dependency-free string hash — only needs to spread different
-// client/bureau combinations across the bank, not cryptographic
-// strength.
+// client/bureau combinations across a bank, not cryptographic strength.
 function hashString(str) {
   let h = 0;
   const s = String(str || "");
@@ -204,6 +223,22 @@ function hashString(str) {
   return Math.abs(h);
 }
 
+// Shared core behind every bank's rotation below (body-content banks via
+// LETTER_TYPES, and BANNER_ASSERTIONS) — one hash/index implementation
+// instead of a copy per bank.
+function initialIndexForBank(bank, clientId, bureau) {
+  if (!bank.length) return 0;
+  return hashString(`${clientId}|${bureau}`) % bank.length;
+}
+function nextIndexForBank(bank, currentIndex) {
+  if (!bank.length) return 0;
+  return (currentIndex + 1) % bank.length;
+}
+function textForBank(bank, index) {
+  if (!bank.length) return "";
+  return bank[((index % bank.length) + bank.length) % bank.length];
+}
+
 // Deterministic starting variant for a given client+bureau (so the same
 // client always opens to the same version rather than reshuffling every
 // time the modal is reopened), spread across the bank so different
@@ -211,19 +246,29 @@ function hashString(str) {
 // Callers cycle to a different index afterward via nextVariantIndex if
 // staff want to swap it for another version from the same bank.
 export function initialVariantIndex(letterTypeKey, clientId, bureau) {
-  const bank = LETTER_TYPES[letterTypeKey]?.bank || [];
-  if (!bank.length) return 0;
-  return hashString(`${clientId}|${bureau}`) % bank.length;
+  return initialIndexForBank(LETTER_TYPES[letterTypeKey]?.bank || [], clientId, bureau);
 }
 
 export function nextVariantIndex(letterTypeKey, currentIndex) {
-  const bank = LETTER_TYPES[letterTypeKey]?.bank || [];
-  if (!bank.length) return 0;
-  return (currentIndex + 1) % bank.length;
+  return nextIndexForBank(LETTER_TYPES[letterTypeKey]?.bank || [], currentIndex);
 }
 
 export function getVariantText(letterTypeKey, index) {
-  const bank = LETTER_TYPES[letterTypeKey]?.bank || [];
-  if (!bank.length) return "";
-  return bank[((index % bank.length) + bank.length) % bank.length];
+  return textForBank(LETTER_TYPES[letterTypeKey]?.bank || [], index);
+}
+
+// Same rotation, for the banner-assertion bank above — kept as its own
+// small set of functions rather than overloading the letterType-keyed
+// ones above, since BANNER_ASSERTIONS isn't part of LETTER_TYPES (it's
+// used on every letter regardless of which body bank is selected).
+export function initialBannerIndex(clientId, bureau) {
+  return initialIndexForBank(BANNER_ASSERTIONS, clientId, bureau);
+}
+
+export function nextBannerIndex(currentIndex) {
+  return nextIndexForBank(BANNER_ASSERTIONS, currentIndex);
+}
+
+export function getBannerText(index) {
+  return textForBank(BANNER_ASSERTIONS, index);
 }

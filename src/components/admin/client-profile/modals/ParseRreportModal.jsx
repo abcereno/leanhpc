@@ -7,7 +7,7 @@ import { runAuditEngine } from "../../../../utils/auditEngine";
 import useLogger from "../../../../hooks/useLogger";
 import { useToast } from "../../../shared/ui/ToastNotifier";
 import { computeBureauProgress } from "../../../../utils/inquiryCounts";
-import { classifyInquiries } from "../../../../utils/classifyInquiries";
+import { extractReportDate, recordReportSnapshot } from "../../../../utils/reportStorage";
 
 const BUCKET = "clients";
 
@@ -192,11 +192,24 @@ export default function ParseReportModal({ show, onClose, clientId, isUpdateMode
       if (uploadError) throw new Error(`Storage Upload Failed: ${uploadError.message}`);
 
       // B. Save Daily Snapshot
+      // Prefers the raw report's own "as-of" date over wall-clock — same
+      // pattern as reportStorage.js#saveUpdateAudit — so this IdentityIQ
+      // initial-import path (the one path that doesn't route through
+      // reportStorage.js at all) stays consistent with every other save
+      // path's snapshot dating and gets recorded in client_report_snapshots
+      // too, so Progress Report can find it by email across dispute rounds.
       try {
-          const dateStr = new Date().toISOString().split('T')[0];
+          const reportDate = extractReportDate(reportData);
+          const dateStr = reportDate || new Date().toISOString().split('T')[0];
           const summaryPath = `${clientId}/${dateStr}_summary_report.json`;
           const blobSummary = new Blob([JSON.stringify(auditSummary, null, 2)], { type: "application/json" });
           await supabase.storage.from(BUCKET).upload(summaryPath, blobSummary, { upsert: true });
+          await recordReportSnapshot(clientId, {
+              reportDate: dateStr,
+              dateSource: reportDate ? "report_date" : "wall_clock",
+              storagePath: summaryPath,
+              provider: "IdentityIQ",
+          });
       } catch (summErr) {
           console.warn("Snapshot failed (non-critical):", summErr);
       }
@@ -223,18 +236,10 @@ export default function ParseReportModal({ show, onClose, clientId, isUpdateMode
         const rawTransunion = inquiries.filter(i => hasBureau(i, 'TU'));
         const rawEquifax = inquiries.filter(i => hasBureau(i, 'EQ'));
 
-        // Admin-side initial import, so run this through the same AI
-        // classifier SmartIdiQModal.jsx's quick-add flow already uses —
-        // lands pre-classified instead of forcing a full manual pass in
-        // the thread editor. See utils/classifyInquiries.js for the
-        // never-throws fallback behavior.
-        const classified = await classifyInquiries({
-          accounts,
-          experian: rawExperian,
-          transunion: rawTransunion,
-          equifax: rawEquifax,
-        });
-
+        // Classification (AI classifier) is intentionally OCR-only
+        // (UploadReportForm.jsx) — this import path lands everything
+        // "non-linked" via the addId fallback below, same as a plain
+        // intake import, and gets classified manually in the thread editor.
         const addId = (item) => ({
             ...item,
             id: item.id || generateId(),
@@ -249,9 +254,9 @@ export default function ParseReportModal({ show, onClose, clientId, isUpdateMode
             status: "active",
             round: 1,
             accounts: accountsWithIds,
-            experian: (classified.experian || []).map(addId),
-            transunion: (classified.transunion || []).map(addId),
-            equifax: (classified.equifax || []).map(addId)
+            experian: rawExperian.map(addId),
+            transunion: rawTransunion.map(addId),
+            equifax: rawEquifax.map(addId)
         };
 
         const threadPath = `${clientId}/thread.json`;

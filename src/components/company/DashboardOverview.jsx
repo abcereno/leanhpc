@@ -4,7 +4,11 @@ import { Spinner, Alert, Badge, Card, Row, Col, Table, Button } from 'react-boot
 import { useNavigate } from 'react-router-dom';
 import { serviceLabel } from '../../utils/services';
 
-const DashboardOverview = ({ refreshKey, pipelineData, handleOpenSummary }) => {
+// `refreshKey` was accepted here but never read — pipelineData already
+// reacts to it since the parent (CompanyPortalDashboard.jsx) refetches and
+// passes down a new pipelineData object on refresh; this component doesn't
+// need its own copy of the trigger.
+const DashboardOverview = ({ pipelineData, handleOpenSummary, openDrawer }) => {
   const { companyId, loading: authLoading, error: authError } = useCompanyAuth();
   const navigate = useNavigate();
 
@@ -93,16 +97,23 @@ const DashboardOverview = ({ refreshKey, pipelineData, handleOpenSummary }) => {
   }, [allClients]);
 
   // --- 4. READINESS DISTRIBUTION MATH ---
+  // A client with no funding_status yet (never assessed) used to fall into
+  // the same "red" bucket as one explicitly assessed RED/high-risk — the
+  // client list view (InquiryRemovalClientList.jsx/ServiceClientList.jsx)
+  // already treats "no status yet" as its own neutral "Pending" badge, not
+  // red, so this donut was showing a different, more alarming answer than
+  // the list for the exact same clients. Split into its own bucket to match.
   const readinessCounts = useMemo(() => {
-    let green = 0; let yellow = 0; let red = 0;
-    
+    let green = 0; let yellow = 0; let red = 0; let pending = 0;
+
     allClients.forEach(c => {
       if (c.funding_status === 'GREEN') green++;
       else if (c.funding_status === 'YELLOW') yellow++;
-      else red++; 
+      else if (c.funding_status === 'RED') red++;
+      else pending++;
     });
 
-    return { green, yellow, red, total: allClients.length };
+    return { green, yellow, red, pending, total: allClients.length };
   }, [allClients]);
 
   // --- 5. ACTIVE TABLE DATA ---
@@ -232,6 +243,7 @@ const DashboardOverview = ({ refreshKey, pipelineData, handleOpenSummary }) => {
                           <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke={theme.success} strokeWidth="3" strokeDasharray={`${(readinessCounts.green/readinessCounts.total)*100}, 100`} />
                           <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke={theme.warning} strokeWidth="3" strokeDasharray={`${(readinessCounts.yellow/readinessCounts.total)*100}, 100`} strokeDashoffset={`-${(readinessCounts.green/readinessCounts.total)*100}`} />
                           <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke={theme.danger} strokeWidth="3" strokeDasharray={`${(readinessCounts.red/readinessCounts.total)*100}, 100`} strokeDashoffset={`-${((readinessCounts.green+readinessCounts.yellow)/readinessCounts.total)*100}`} />
+                          <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke={theme.unpaid} strokeWidth="3" strokeDasharray={`${(readinessCounts.pending/readinessCounts.total)*100}, 100`} strokeDashoffset={`-${((readinessCounts.green+readinessCounts.yellow+readinessCounts.red)/readinessCounts.total)*100}`} />
                         </>
                       )}
                     </svg>
@@ -251,6 +263,10 @@ const DashboardOverview = ({ refreshKey, pipelineData, handleOpenSummary }) => {
                     <div className="d-flex justify-content-between align-items-center">
                       <span className="small fw-bold text-white"><i className="bi bi-circle-fill me-2" style={{ color: theme.danger, fontSize: '8px' }}></i>Not Ready</span>
                       <Badge bg="dark" className="border" style={{ borderColor: theme.border }}>{readinessCounts.red}</Badge>
+                    </div>
+                    <div className="d-flex justify-content-between align-items-center">
+                      <span className="small fw-bold text-white"><i className="bi bi-circle-fill me-2" style={{ color: theme.unpaid, fontSize: '8px' }}></i>Not Yet Assessed</span>
+                      <Badge bg="dark" className="border" style={{ borderColor: theme.border }}>{readinessCounts.pending}</Badge>
                     </div>
                   </div>
                 </div>
@@ -315,7 +331,21 @@ const DashboardOverview = ({ refreshKey, pipelineData, handleOpenSummary }) => {
           <h6 className="fw-bold text-uppercase mb-0" style={{ color: STAGE_LABELS[activeStage].color, fontSize: '0.9rem', letterSpacing: '1px' }}>
             {STAGE_LABELS[activeStage].label} Clients
           </h6>
-          <Badge bg="dark" className="border" style={{ borderColor: theme.border }}>{displayedClients.length} Records</Badge>
+          <div className="d-flex align-items-center gap-2">
+            <Badge bg="dark" className="border" style={{ borderColor: theme.border }}>{displayedClients.length} Records</Badge>
+            {/* openDrawer was passed by CompanyPortalDashboard.jsx but never
+                used here — the richer slide-over (funding check/blueprint/
+                summary actions, same pipeline stage data) it opens sat
+                completely unreachable. This table already covers the same
+                "clients in this stage" concept in-page; the button just
+                surfaces the fuller drawer as an option rather than
+                duplicating its actions inline. */}
+            {openDrawer && (
+              <Button size="sm" variant="outline-light" className="border-secondary" onClick={() => openDrawer(activeStage)} title="Open in slide-over with more actions">
+                <i className="bi bi-arrows-angle-expand"></i>
+              </Button>
+            )}
+          </div>
         </Card.Header>
         <Card.Body className="p-0 overflow-auto custom-scrollbar flex-grow-1 position-relative">
           
@@ -356,7 +386,8 @@ const DashboardOverview = ({ refreshKey, pipelineData, handleOpenSummary }) => {
                     <td>
                       {c.funding_status === 'GREEN' && <Badge bg="success"><i className="bi bi-check-circle-fill me-1"></i> Ready Now</Badge>}
                       {c.funding_status === 'YELLOW' && <Badge bg="warning" text="dark"><i className="bi bi-exclamation-triangle-fill me-1"></i> Needs Action</Badge>}
-                      {c.funding_status !== 'GREEN' && c.funding_status !== 'YELLOW' && <Badge bg="danger"><i className="bi bi-shield-x me-1"></i> Not Ready</Badge>}
+                      {c.funding_status === 'RED' && <Badge bg="danger"><i className="bi bi-shield-x me-1"></i> Not Ready</Badge>}
+                      {c.funding_status !== 'GREEN' && c.funding_status !== 'YELLOW' && c.funding_status !== 'RED' && <Badge bg="secondary"><i className="bi bi-dash-circle me-1"></i> Not Yet Assessed</Badge>}
                     </td>
                     <td>
                       <Badge bg="info" className="text-dark fw-bold">{c.pScore || 0}% Done</Badge>

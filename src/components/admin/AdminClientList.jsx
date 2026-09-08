@@ -19,7 +19,6 @@ import AddClientSidebar from "./add-client-sidebar/AddClientSidebar";
 import SmartIdiQModal from "./smart-idiq/SmartIdiQModal";
 import useAdminClients from "../../hooks/useAdminClients";
 import FunderEligibilityModal from "../shared/ui/FunderEligibilityModal";
-import { getHolidays, calculateBusinessDays } from "../../utils/dateHelpers";
 import InquiryLoader from "../shared/ui/InquiryLoader";
 import BulkEditModal from "./client-profile/BulkEditModal";
 import ClientSummaryModal from "./client-profile/modals/ClientSummaryModal";
@@ -54,6 +53,7 @@ export default function AdminClientList() {
     taskFilter, setTaskFilter,
     agentFilter, setAgentFilter, agentOptions,
     companyOptions,
+    sortField, sortDirection, handleSort,
     handleDeleteClient,
     handleTogglePause,
     handleSetPaidAt,
@@ -62,13 +62,12 @@ export default function AdminClientList() {
 
   // Local Component State
   const [activeClientId, setActiveClientId] = useState(null);
-  const [tabCounts, setTabCounts] = useState({ all: 0, paid: 0, unpaid: 0, completed: 0 });
+  const [tabCounts, setTabCounts] = useState({ all: 0, paid: 0, unpaid: 0, completed: 0, notCompleted: 0 });
   const [showAddClient, setShowAddClient] = useState(false);
   const [showCountInquiries, setShowCountInquiries] = useState(false);
   const [helpRequests, setHelpRequests] = useState([]);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [holidaySet, setHolidaySet] = useState(new Set());
   const [selectedIds, setSelectedIds] = useState(new Set());
   // useAdminClients now groups same-email clients (one clients row per
   // dispute_round) into a single list entry — one row per person instead of
@@ -94,7 +93,6 @@ export default function AdminClientList() {
   const [showEligibilityModal, setShowEligibilityModal] = useState(false);
   const [eligibilityClient, setEligibilityClient] = useState(null);
 
-  useEffect(() => { getHolidays().then(setHolidaySet); }, []);
   useEffect(() => { if (tbodyRef.current) autoAnimate(tbodyRef.current); }, [tbodyRef]);
 
   // Tab Counts Fetch
@@ -110,6 +108,7 @@ export default function AdminClientList() {
           paid: data.filter((c) => c.paid_at && !c.all_completed).length,
           unpaid: data.filter((c) => !c.paid_at && !c.all_completed).length,
           completed: data.filter((c) => c.all_completed).length,
+          notCompleted: data.filter((c) => c.paid_at && !c.all_completed).length,
         });
       }
     };
@@ -301,6 +300,24 @@ export default function AdminClientList() {
   // =======================================================================
   // 3. COMPONENT RENDER BLOCK: TABLE & PAGINATION
   // =======================================================================
+  // Clickable column header — click sorts by `field` (see useAdminClients.js
+  // #handleSort/#sortedClientList), click again reverses direction. Only
+  // the active column shows an arrow, so headers don't turn into visual
+  // noise on a table this dense.
+  const SortableTh = ({ field, children, className = "", style }) => (
+    <th
+      className={`user-select-none ${className}`}
+      style={{ cursor: "pointer", ...style }}
+      onClick={() => handleSort(field)}
+      title="Click to sort"
+    >
+      {children}
+      {sortField === field && (
+        <i className={`bi bi-caret-${sortDirection === "asc" ? "up" : "down"}-fill ms-1`} style={{ fontSize: "0.7rem" }}></i>
+      )}
+    </th>
+  );
+
   const renderTable = () => (
     <Card className="shadow-sm border-0">
       <Card.Header className="bg-transparent border-0 pt-3 pb-3 d-flex flex-wrap justify-content-between align-items-center gap-3">
@@ -308,6 +325,7 @@ export default function AdminClientList() {
           <Tab eventKey="all" title={<div className="d-flex align-items-center"><span className="fw-medium px-1">All Clients</span><Badge bg="secondary" className="ms-2 rounded-pill shadow-sm">{tabCounts.all}</Badge></div>} />
           <Tab eventKey="paid" title={<div className="d-flex align-items-center"><i className="bi bi-currency-dollar text-success me-1"></i><span className="fw-medium px-1">Paid</span><Badge bg="success" className="ms-2 rounded-pill shadow-sm">{tabCounts.paid}</Badge></div>} />
           <Tab eventKey="unpaid" title={<div className="d-flex align-items-center"><i className="bi bi-clock text-warning me-1"></i><span className="fw-medium px-1">Unpaid</span><Badge bg="warning" text="dark" className="ms-2 rounded-pill shadow-sm">{tabCounts.unpaid}</Badge></div>} />
+          <Tab eventKey="not_completed" title={<div className="d-flex align-items-center"><i className="bi bi-hourglass-split text-info me-1"></i><span className="fw-medium px-1">Not Completed</span><Badge bg="info" text="dark" className="ms-2 rounded-pill shadow-sm">{tabCounts.notCompleted}</Badge></div>} />
           <Tab eventKey="completed" title={<div className="d-flex align-items-center"><i className="bi bi-check-circle text-primary me-1"></i><span className="fw-medium px-1">Completed</span><Badge bg="primary" className="ms-2 rounded-pill shadow-sm">{tabCounts.completed}</Badge></div>} />
         </Tabs>
 
@@ -322,18 +340,19 @@ export default function AdminClientList() {
             <tr>
               <th className="text-center" style={{ width: "40px" }}><Form.Check type="checkbox" onChange={handleSelectAll} checked={pagedClients.length > 0 && selectedIds.size === pagedClients.length} /></th>
               <th className="text-center" style={{ width: "50px" }}>#</th>
-              <th>Client Profile</th>
-              <th>Company</th>
-              <th>Agent</th>
-              <th style={{ minWidth: "120px" }}>Progress</th>
-              <th className="text-center">Duration</th>
+              <SortableTh field="name">Client Profile</SortableTh>
+              <th>Next Step</th>
+              <SortableTh field="company">Company</SortableTh>
+              <SortableTh field="agent">Agent</SortableTh>
+              <SortableTh field="progress" style={{ minWidth: "120px" }}>Progress</SortableTh>
+              <SortableTh field="duration" className="text-center">Duration</SortableTh>
               <th className="text-end pe-4">Actions</th>
             </tr>
           </thead>
           <tbody ref={tbodyRef}>
             {pagedClients.length === 0 ? (
               <tr>
-                <td colSpan="8" className="text-center py-5 text-muted">
+                <td colSpan="9" className="text-center py-5 text-muted">
                   <i className="bi bi-folder2-open display-6 d-block mb-3 opacity-50"></i>
                   No clients found matching your filters.
                 </td>
@@ -342,14 +361,17 @@ export default function AdminClientList() {
               pagedClients.map((group, index) => {
                 const client = getActiveClient(group);
 
-                const unpaidEndDate = client.paid_at ? client.paid_at : new Date();
-                const unpaidBizDays = calculateBusinessDays(client.created_at, unpaidEndDate, holidaySet);
-                let paidBizDays = null;
-                
-                if (client.paid_at) {
-                  const endDate = client.date_completed ? client.date_completed : new Date();
-                  paidBizDays = calculateBusinessDays(client.paid_at, endDate, holidaySet);
-                }
+                // Both already come from useAdminClients.js's enrichRows —
+                // business days only (calculateBusinessDays excludes
+                // weekends and company_holidays), same as before. Switched
+                // from recomputing inline here because the inline version
+                // didn't freeze while a client was paused, unlike
+                // paidRunningDays (dateHelpers.js#calculatePaidRunningDays)
+                // — a paused client's Active day count, row color, and sort
+                // order kept climbing right along with active files instead
+                // of holding still, undercutting the whole point of pausing.
+                const unpaidBizDays = client.createdRunningDays ?? 0;
+                const paidBizDays = client.paid_at ? (client.paidRunningDays ?? 0) : null;
 
                 // Aging Colors (14 = Yellow, 21 = Orange, 28 = Red, Completed = Green)
                 let rowClass = "";
@@ -406,6 +428,19 @@ export default function AdminClientList() {
                       <div className="small text-muted mt-1 ms-5">
                         {serviceLabel(client, "—")} • {client.counter || "—"} • {client.start_inquiries || "—"}
                       </div>
+                    </td>
+                    <td>
+                      {client.nextStepTag && (
+                        <Badge
+                          bg={client.nextStepTag.variant}
+                          text={client.nextStepTag.textDark ? "dark" : undefined}
+                          className="shadow-sm"
+                          style={{ fontSize: "0.7rem", whiteSpace: "normal" }}
+                        >
+                          <i className={`bi ${client.nextStepTag.icon} me-1`}></i>
+                          {client.nextStepTag.label}
+                        </Badge>
+                      )}
                     </td>
                     <td className="text-muted fw-medium">{client.companies?.company_name || "—"}</td>
                     <td>

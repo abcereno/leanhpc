@@ -355,7 +355,14 @@ export default function useInquiriesThread({
                 const settings = { inquiryMonths: 6, maxInqCount: 2, maxUtil: 35, minAccts: 5 };
                 const analysis = calculateFundingEligibility(reportJson, settings);
 
-                const activeInqs = totalAll.filter(inq => normClass(inq.classification) !== 'deleted');
+                // `totalAll` doesn't exist in this scope (ReferenceError) —
+                // was throwing every single save, which sent this whole try
+                // block straight to the catch below and left
+                // finalFundingStatus at 'UNKNOWN' regardless of the
+                // utilization/depth/inquiry logic above ever running.
+                // sanitizedInquiries (line 271) is this hook's actual
+                // flattened, all-bureau list of the current inquiries.
+                const activeInqs = sanitizedInquiries.filter(inq => normClass(inq.classification) !== 'deleted');
                 
                 const cutoffDate = new Date();
                 cutoffDate.setMonth(cutoffDate.getMonth() - settings.inquiryMonths);
@@ -367,11 +374,24 @@ export default function useInquiriesThread({
                     else if (!dateStr) recentCount++; 
                 });
 
-                let newStatus = "GREEN";
-                if (analysis.metrics.utilization > settings.maxUtil) newStatus = "RED";
-                if (analysis.metrics.revolving_accounts < settings.minAccts) newStatus = newStatus === "RED" ? "RED" : "YELLOW";
+                // Start from funderRules.js's own complete verdict (all 6
+                // rules — utilization, account depth, its own inquiry
+                // velocity off the stored report, derogatories, bankruptcy
+                // override, mortgage seasoning) instead of re-deriving a
+                // partial 3-rule version here, which used to silently skip
+                // the derogatory-count and bankruptcy checks on every save.
+                let newStatus = analysis.status;
+
+                // One override kept on top of that: recentCount reflects the
+                // THREAD's live classification state (inquiries the admin has
+                // already worked/deleted this session), which is more
+                // current than the static inquiries list inside the stored
+                // report JSON that analysis.metrics.inquiries_recent is
+                // computed from. RED is already the worst tier, so this can
+                // only ever raise the status, never lower what the engine
+                // already decided.
                 if (recentCount > settings.maxInqCount) newStatus = "RED";
-                
+
                 finalFundingStatus = newStatus;
             }
         } catch (fundingErr) {

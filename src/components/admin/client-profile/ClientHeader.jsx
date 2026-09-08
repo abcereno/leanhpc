@@ -314,7 +314,13 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
 
   const handleUpdateComplete = async (rawJson, analysis) => {
     try {
-      await saveUpdateAudit(clientId, rawJson, analysis);
+      // handleUpdateComplete is shared by both "Update Existing" modals
+      // (see the Reports dropdown below) — activeModal is still set to
+      // whichever one is currently open at this point, so it's the
+      // cheapest reliable way to tag which provider this snapshot came
+      // from without threading a new prop through both modals.
+      const provider = activeModal === "parseIq" ? "IdentityIQ" : activeModal === "fetch3b" ? "SmartCredit" : null;
+      await saveUpdateAudit(clientId, rawJson, analysis, provider);
       addToast({ title: "Success", message: "Report Updated Successfully! The Progress Chart has been updated.", variant: "success", icon: "bi-check-circle" });
       await refetch();
       if (onRefresh) onRefresh();

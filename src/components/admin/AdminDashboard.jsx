@@ -56,7 +56,7 @@ const getStartOfMonthString = () => {
 /**
  * The admin landing page (/admin-dashboard). Formerly just the call/
  * production metrics view below (now the "Call Metrics" tab) — the
- * Operations Dashboard from the Bernard ops sprint is now the default set
+ * Operations Dashboard from the client's ops sprint is now the default set
  * of tabs here instead of living at its own /ops route.
  *
  * Overview = Quick Actions + Health Score + Company Snapshot + Daily

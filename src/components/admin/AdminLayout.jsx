@@ -2,6 +2,7 @@ import { Suspense, useState } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useNotification } from "../../context/NotificationContext";
+import { FloatingDockProvider } from "../../context/FloatingDockContext";
 import { Toast, ToastContainer, Spinner } from "react-bootstrap";
 
 // Components
@@ -31,8 +32,13 @@ export default function AdminLayout() {
           of "pages this shouldn't show on." See App.jsx's comment at the old
           mount site for the incident that prompted this. */}
       <AdminNotificationWatcher />
-      <ClientSubmissionListener />
-      <SupportChatPopups />
+      {/* Coordinates the two bottom-right floating widgets below so only
+          one's panel is ever expanded at a time — see
+          FloatingDockContext.jsx for why. */}
+      <FloatingDockProvider>
+        <ClientSubmissionListener />
+        <SupportChatPopups />
+      </FloatingDockProvider>
       <ToastContainer position="top-end" className="p-3" style={{ zIndex: 9999, position: 'fixed' }}>
         {notifications.map((note) => (
           <Toast key={note.id} onClose={() => removeNotification(note.id)} bg={note.type === 'success' ? 'success' : 'info'} autohide delay={5000}>
@@ -68,7 +74,7 @@ export default function AdminLayout() {
               <Outlet />
             </Suspense>
           </main>
-            <AppFooter />
+          <AppFooter />
 
         </div>
       </div>

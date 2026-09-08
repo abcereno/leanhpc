@@ -77,6 +77,13 @@ export const PERMISSION_GROUPS = [
       // initials, permanently logged in authorization_overrides), even
       // though in practice the same supervisors will usually hold both.
       { key: "override_authorization_hold", label: "Override Authorization Holds" },
+      // Gates the AI Review Queue (src/components/admin/AiReviewQueue.jsx):
+      // inquiries the classify-inquiries edge function's own deterministic
+      // guard downgraded from a model-proposed linked/associated call back
+      // to non-linked (see sql/add_ai_review_queue.sql). Separate from
+      // approve_count_reviews — resolving "the AI wasn't confident here" is
+      // a different decision from approving a dispute count.
+      { key: "review_ai_flags", label: "Review AI Classification Flags" },
     ],
   },
   {

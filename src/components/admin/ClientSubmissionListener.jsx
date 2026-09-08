@@ -8,6 +8,8 @@ import useLogger from "../../hooks/useLogger";
 import { useToast } from "../shared/ui/ToastNotifier";
 import { isBlankStartInquiries } from "../../utils/inquiryCounts";
 import { formatDurationBetween } from "../../utils/formatDuration";
+import { useFloatingDock } from "../../context/FloatingDockContext";
+import { CORNER_OFFSET, PIPELINE_LAUNCHER_BOTTOM } from "../../utils/floatingDock";
 
 const QUEUE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -63,7 +65,13 @@ export default function ClientSubmissionListener() {
   const [loadingQueue, setLoadingQueue] = useState(false);
   const [now, setNow] = useState(Date.now());
   const channelRef = useRef(null);
-  const [isMinimized, setIsMinimized] = useState(true);
+  // Expanded/minimized used to be purely local state — now derived from
+  // the shared dock (FloatingDockContext.jsx) so this card and the support
+  // chat widget can never both be expanded at once. Opening this one
+  // (openPanel) auto-collapses chat; minimizing it (closePanel) just gives
+  // the dock back up, it doesn't force anything else open.
+  const { activePanel, openPanel, closePanel } = useFloatingDock();
+  const isMinimized = activePanel !== "pipeline";
 
   // Flips to false the first time a query proves clients.counted_at doesn't
   // exist yet (sql/add_counted_at.sql not run) — avoids repeating a request
@@ -457,7 +465,12 @@ export default function ClientSubmissionListener() {
   if (!canViewQueue) return null;
 
   return (
-    <div className="position-fixed bottom-0 end-0 p-3" style={{ zIndex: 2000 }}>
+    // Minimized: stacks directly above the chat widget's own launcher zone
+    // (PIPELINE_LAUNCHER_BOTTOM). Expanded: takes over chat's normal
+    // corner (CORNER_OFFSET) instead — safe to reuse, since claiming the
+    // dock (openPanel below) always collapses chat's panels first, so the
+    // two are never both expanded at once. See FloatingDockContext.jsx.
+    <div className="position-fixed end-0 p-3" style={{ bottom: isMinimized ? PIPELINE_LAUNCHER_BOTTOM : CORNER_OFFSET, zIndex: 2000 }}>
       {/* --- FLOATING CIRCLE BUTTON --- */}
       {isMinimized ? (
         <div className="position-relative">
@@ -465,7 +478,7 @@ export default function ClientSubmissionListener() {
             variant={pendingCount > 0 ? "danger" : "dark"}
             className="rounded-circle shadow-lg d-flex align-items-center justify-content-center p-0"
             style={{ width: '60px', height: '60px', transition: 'transform 0.2s' }}
-            onClick={() => { setNow(Date.now()); setIsMinimized(false); }}
+            onClick={() => { setNow(Date.now()); openPanel("pipeline"); }}
             onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
             onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1.0)'}
           >
@@ -499,7 +512,7 @@ export default function ClientSubmissionListener() {
                     <Button variant="link" size="sm" className="p-0 text-white" onClick={fetchQueue}>
                         <i className="bi bi-arrow-clockwise"></i>
                     </Button>
-                    <Button variant="link" size="sm" className="p-0 text-white" onClick={() => setIsMinimized(true)}>
+                    <Button variant="link" size="sm" className="p-0 text-white" onClick={() => closePanel("pipeline")}>
                         <i className="bi bi-dash-lg fs-5"></i>
                     </Button>
                 </div>
@@ -532,7 +545,7 @@ export default function ClientSubmissionListener() {
                                     <Badge bg="success" pill><i className="bi bi-check2-all me-1"></i>{client.processingDuration || "Done"}</Badge>
                                 ) : (
                                     client.assignedToMe ? (
-                                        <Button size="sm" variant="primary" className="py-0 px-2 fw-bold" onClick={() => { navigate(`/clients/${client.id}`); setIsMinimized(true); }}>
+                                        <Button size="sm" variant="primary" className="py-0 px-2 fw-bold" onClick={() => { navigate(`/clients/${client.id}`); closePanel("pipeline"); }}>
                                             COUNT IT
                                         </Button>
                                     ) : (

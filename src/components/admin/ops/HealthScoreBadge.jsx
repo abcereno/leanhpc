@@ -12,7 +12,7 @@ const PENALTY_LABELS = {
  * Single-number "Operations Health Score" (0-100). Weighting is a
  * first-pass guess (see utils/opsMetrics.js#computeHealthScore) — flagged
  * to the user in the tooltip footer since it hasn't been confirmed with
- * Bernard yet.
+ * the client yet.
  */
 export default function HealthScoreBadge({ score, penalties, avgProcessingDays }) {
   const variant = score >= 80 ? "success" : score >= 60 ? "warning" : "danger";
@@ -31,7 +31,7 @@ export default function HealthScoreBadge({ score, penalties, avgProcessingDays }
         </ul>
         <div className="small">Avg processing: {avgProcessingDays}d</div>
         <div className="small fst-italic mt-1">
-          First-pass weighting, not yet confirmed with Bernard.
+          First-pass weighting, not yet confirmed with the client.
         </div>
       </div>
     </Tooltip>

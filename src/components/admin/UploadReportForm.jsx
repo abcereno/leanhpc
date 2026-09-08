@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../supabaseClient";
 import { getDocument } from "pdfjs-dist";
-import Tesseract from "tesseract.js";
+import { createWorker } from "tesseract.js";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
 import "pdfjs-dist/build/pdf.worker";
 import OCRPreview from "./report-canvas/OcrPreview";
@@ -11,7 +11,25 @@ import { useAuth } from "../../context/AuthContext";
 import { getEasternDateString } from "../../utils/timezone";
 import { computeAiCounts, withDefaultedApprovedCounts, isBlankStartInquiries } from "../../utils/inquiryCounts";
 import { fetchLenderAliases } from "../../utils/classifyInquiries";
+import { flagGuardedInquiries } from "../../utils/aiReviewQueue";
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.js";
+
+// Contrast-stretches a rendered page to grayscale before OCR — credit
+// reports are dense small-font tables, and a mild grayscale + contrast
+// boost (not a hard black/white threshold, which risks losing thin
+// character strokes on lower-quality scans) measurably helps Tesseract's
+// accuracy on this kind of content without needing a heavier image
+// library.
+function preprocessForOcr(context, width, height) {
+  const imageData = context.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const contrasted = gray < 150 ? Math.max(0, gray - 25) : Math.min(255, gray + 25);
+    data[i] = data[i + 1] = data[i + 2] = contrasted;
+  }
+  context.putImageData(imageData, 0, 0);
+}
 
 export default function UploadReportForm() {
   const {adminName, userId} = useAuth();
@@ -43,15 +61,38 @@ export default function UploadReportForm() {
 
   const handleOCR = async () => {
     setMessage("");
+    // A fresh Step 1 run invalidates whatever Step 2 previously produced —
+    // without this, re-running OCR (new file, or retrying after a failure)
+    // left the old ocrText/parsedInquiries sitting around, and Step 2 was
+    // still enabled against that stale text.
+    setOcrText("");
+    setParsedInquiries({ accounts: [], experian: [], transunion: [], equifax: [] });
     if (!file) return setMessage("❌ Please upload a PDF.");
     setUploading(true);
 
+    // One shared Tesseract worker for the whole document, reused across
+    // every page. Tesseract.recognize(image, lang) — the previous
+    // approach — spins up and tears down a brand-new worker on every
+    // single call (see node_modules/tesseract.js/src/Tesseract.js), so a
+    // 20-page report meant 20 full engine initializations instead of one.
+    let worker;
+    try {
+      worker = await createWorker("eng");
+    } catch (err) {
+      console.error("OCR engine failed to start:", err);
+      setMessage("❌ OCR engine failed to start.");
+      setUploading(false);
+      return;
+    }
+
+    const failedPages = [];
     try {
       const pdfBlob = await file.arrayBuffer();
       const pdf = await getDocument({ data: pdfBlob }).promise;
       let fullText = "";
 
       for (let i = 1; i <= pdf.numPages; i++) {
+        setMessage(`🧠 OCR: page ${i} of ${pdf.numPages}...`);
         try {
           const page = await pdf.getPage(i);
           const viewport = page.getViewport({ scale: 2 });
@@ -64,6 +105,7 @@ export default function UploadReportForm() {
           canvas.height = viewport.height;
 
           await page.render({ canvasContext: context, viewport }).promise;
+          preprocessForOcr(context, canvas.width, canvas.height);
 
           const imageDataUrl = canvas.toDataURL("image/png");
           if (!imageDataUrl || imageDataUrl.length < 100)
@@ -71,23 +113,32 @@ export default function UploadReportForm() {
 
           const {
             data: { text },
-          } = await Tesseract.recognize(imageDataUrl, "eng");
+          } = await worker.recognize(imageDataUrl);
           fullText += `\n\n--- PAGE ${i} ---\n\n` + text;
         } catch (err) {
+          // Deliberately NOT appended to fullText. The old "[OCR failed]"
+          // placeholder got spliced straight into what the account/inquiry
+          // parser reads in Step 2, where it could be misread as real
+          // report content. A failed page is just dropped and reported to
+          // the user below instead.
           console.error(`❌ OCR failed on page ${i}:`, err);
-          fullText += `\n\n--- PAGE ${i} ---\n\n[OCR failed]`;
+          failedPages.push(i);
         }
       }
 
       setOcrText(fullText);
-
-      setMessage("✅ OCR complete. Review below.");
+      setMessage(
+        failedPages.length
+          ? `⚠️ OCR complete — page(s) ${failedPages.join(", ")} failed and were skipped. Review below.`
+          : "✅ OCR complete. Review below."
+      );
     } catch (err) {
       console.error("OCR Error:", err);
       setMessage("❌ OCR failed.");
+    } finally {
+      await worker.terminate();
+      setUploading(false);
     }
-
-    setUploading(false);
   };
 
   const splitOCRByPages = (ocrText, pagesPerChunk = 5) => {
@@ -253,6 +304,11 @@ accumulatedInquiries.equifax.push(...(classifyJson.equifax || []));
 
     if (error) return setMessage(`❌ Failed to save: ${error.message}`);
 
+    // AI Review Queue — flags any inquiry the classifier's own
+    // deterministic guard downgraded (see utils/aiReviewQueue.js). Best
+    // effort, never blocks the save this runs after.
+    flagGuardedInquiries(supabase, selectedClientId, parsedInquiries);
+
     // Phase 0: persisted bureau counts (see utils/inquiryCounts.js — same
     // helper used by useInquiriesThread.js and SmartIdiQModal.jsx so all
     // three upload paths compute "AI count" identically). approved_*_count
@@ -349,7 +405,16 @@ return (
         type="file"
         className="form-control"
         accept="application/pdf"
-        onChange={(e) => setFile(e.target.files[0])}
+        onChange={(e) => {
+          // Picking a new file invalidates any OCR/parse output from the
+          // previous one — otherwise Step 2 stayed enabled and would
+          // happily save the old file's data under whatever client is
+          // selected.
+          setFile(e.target.files[0] || null);
+          setOcrText("");
+          setParsedInquiries({ accounts: [], experian: [], transunion: [], equifax: [] });
+          setMessage("");
+        }}
       />
     </div>
 

@@ -7,6 +7,7 @@ import useLogger from "../../../hooks/useLogger";
 import { computeAiCounts, withDefaultedApprovedCounts, isBlankStartInquiries, computeBureauProgress } from "../../../utils/inquiryCounts";
 import { resolveRoundForNewClient, insertClientRecord } from "../../../utils/clientDuplicateRound";
 import { classifyInquiries } from "../../../utils/classifyInquiries";
+import { flagGuardedInquiries } from "../../../utils/aiReviewQueue";
 import { useToast } from "../../shared/ui/ToastNotifier";
 
 export default function SmartIdiQModal({ show, onClose }) {
@@ -91,6 +92,11 @@ export default function SmartIdiQModal({ show, onClose }) {
     if (error) {
       throw new Error(`Classified but failed to save: ${error.message}`);
     }
+
+    // 1b. AI Review Queue — flags any inquiry the classifier's own
+    // deterministic guard downgraded (see utils/aiReviewQueue.js). Best
+    // effort, never blocks the save this runs after.
+    flagGuardedInquiries(supabase, clientId, classified);
 
     // 2. [NEW] Log to 'ai_training_logs'
     // We assume 'classified' contains the counts or the full object acts as the count source

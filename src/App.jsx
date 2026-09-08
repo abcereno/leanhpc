@@ -10,6 +10,7 @@ import { Spinner } from "react-bootstrap";
 import ToastProvider from "./components/shared/ui/ToastNotifier";
 import AdminServiceOrders from "./components/admin/AdminServiceOrders";
 import CountReviewQueue from "./components/admin/CountReviewQueue";
+import AiReviewQueue from "./components/admin/AiReviewQueue";
 // Layouts & Guards
 import AdminLayout from "./components/admin/AdminLayout";
 import MainLayout from "./components/shared/layout/MainLayout";
@@ -256,6 +257,10 @@ function AppRoutes() {
 
             <Route element={<PermissionGuard permissions={['approve_count_reviews']} />}>
               <Route path="/count-reviews" element={<CountReviewQueue />} />
+            </Route>
+
+            <Route element={<PermissionGuard permissions={['review_ai_flags']} />}>
+              <Route path="/ai-review-queue" element={<AiReviewQueue />} />
             </Route>
 
             {/* Setting your own display name — no specific capability
