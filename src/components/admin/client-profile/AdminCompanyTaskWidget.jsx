@@ -3,10 +3,12 @@ import { Card, Form, Button, ListGroup, Badge, Spinner } from 'react-bootstrap';
 import { supabase } from '../../../supabaseClient';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../shared/ui/ToastNotifier';
+import { useConfirm } from '../../shared/ui/ConfirmDialog';
 
 // 👇 Added refreshKey to props 👇
 export default function AdminCompanyTaskWidget({ clientId, refreshKey }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const { user } = useAuth();
   const [tasks, setTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
@@ -56,7 +58,7 @@ export default function AdminCompanyTaskWidget({ clientId, refreshKey }) {
   };
 
   const handleDelete = async (id) => {
-    if(!window.confirm("Delete this task?")) return;
+    if(!(await confirm("Delete this task?"))) return;
     const { error } = await supabase.from('company_tasks').delete().eq('id', id);
     if (!error) fetchTasks();
   };

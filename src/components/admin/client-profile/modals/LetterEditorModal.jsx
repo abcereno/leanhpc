@@ -13,6 +13,7 @@ import { TextStyle, Color, FontFamily, FontSize } from "@tiptap/extension-text-s
 import { supabase } from "../../../../supabaseClient";
 import useLogger from "../../../../hooks/useLogger";
 import { useToast } from "../../../shared/ui/ToastNotifier";
+import { useConfirm } from "../../../shared/ui/ConfirmDialog";
 import { groupDisputableByBureau } from "../../../../utils/inquiryCounts";
 import { compileLetterHtml } from "../../../../utils/letterTemplate";
 import { generateLetterPdfBlob, downloadBlob, PAGE_WIDTH_IN, PAGE_MARGIN_IN, PAGE_HEIGHT_IN, LETTER_TYPOGRAPHY_CSS } from "../../../../utils/letterPdf";
@@ -73,6 +74,7 @@ const BRAND_COLORS = [
 export default function LetterEditorModal({ show, onClose, clientId, letterAssets, inquiries, round = 1, userId, onGenerated }) {
   const logAction = useLogger();
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
 
   const [loadingClient, setLoadingClient] = useState(false);
   const [letterType, setLetterType] = useState(DEFAULT_LETTER_TYPE);
@@ -346,10 +348,10 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
   // Changing letter type re-rolls every bureau's letter from the new
   // bank (same discard-edits confirmation as trying another version,
   // since it swaps the whole body).
-  const handleLetterTypeChange = (nextType) => {
+  const handleLetterTypeChange = async (nextType) => {
     if (nextType === letterType) return;
     const bureaus = Object.keys(letters);
-    if (bureaus.length && !window.confirm("Switch letter type? Any edits you've made will be lost.")) return;
+    if (bureaus.length && !(await confirm("Switch letter type? Any edits you've made will be lost."))) return;
     setLetterType(nextType);
     if (!clientInfo) return;
     const nextLetters = {};
@@ -373,9 +375,9 @@ export default function LetterEditorModal({ show, onClose, clientId, letterAsset
   // Cycles BOTH the body paragraphs and the banner assertion together —
   // "another version" should mean a genuinely different letter, not just
   // different body wording with the same banner line every time.
-  const handleTryAnotherVersion = () => {
+  const handleTryAnotherVersion = async () => {
     if (!activeBureau || !clientInfo) return;
-    if (!window.confirm("Try another version of this letter? Any edits you've made will be lost.")) return;
+    if (!(await confirm("Try another version of this letter? Any edits you've made will be lost."))) return;
     const currentIdx = variantIndexes[activeBureau] ?? 0;
     const idx = nextVariantIndex(letterType, currentIdx);
     const currentBannerIdx = bannerIndexes[activeBureau] ?? 0;

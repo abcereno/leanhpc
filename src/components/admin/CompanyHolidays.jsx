@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import {
   Card,
   Table,
@@ -15,6 +16,7 @@ import {
 
 export default function CompanyHolidays() {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [holidays, setHolidays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -68,7 +70,7 @@ export default function CompanyHolidays() {
   }
 
   async function handleDelete(dateToDelete) {
-    if (!window.confirm(`Are you sure you want to remove the holiday on ${dateToDelete}?`)) {
+    if (!(await confirm(`Are you sure you want to remove the holiday on ${dateToDelete}?`))) {
       return;
     }
 

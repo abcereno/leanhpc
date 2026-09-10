@@ -18,6 +18,16 @@ export default function useFinancialLogs(startDate, endDate) {
   const [totalBonuses, setTotalBonuses] = useState(0);
   const [netProfit, setNetProfit] = useState(0);
 
+  // Previous-period totals — the equal-length window immediately before
+  // [startDate, endDate], used for the dashboard's "+8% vs last period"
+  // KPI deltas. Only meaningful when the user has actually picked a date
+  // range (a "previous period" for "All time" isn't a coherent concept),
+  // so these stay null until both startDate and endDate are set.
+  const [prevTotalIncome, setPrevTotalIncome] = useState(null);
+  const [prevTotalExpenses, setPrevTotalExpenses] = useState(null);
+  const [prevTotalCompensation, setPrevTotalCompensation] = useState(null);
+  const [prevNetProfit, setPrevNetProfit] = useState(null);
+
   // ui state
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -128,6 +138,55 @@ export default function useFinancialLogs(startDate, endDate) {
 
       // Net profit includes bonuses as compensation cost
       setNetProfit(incomeTotal - expensesTotal - payrollTotal - bonusesTotal);
+
+      // ---- Previous-period totals (KPI deltas)
+      // Same-length window immediately before [startDate, endDate] — e.g.
+      // selecting "Last 30d" compares against the 30 days before that.
+      // Only sums are needed here (not full rows), so this is 4 small
+      // count-free aggregate fetches rather than reusing the row-level
+      // queries above.
+      if (startDate && endDate) {
+        const msPerDay = 24 * 60 * 60 * 1000;
+        const start = new Date(`${startDate}T00:00:00Z`);
+        const end = new Date(`${endDate}T00:00:00Z`);
+        const rangeDays = Math.max(1, Math.round((end - start) / msPerDay) + 1);
+        const prevEndDate = new Date(start.getTime() - msPerDay).toISOString().slice(0, 10);
+        const prevStartDate = new Date(start.getTime() - rangeDays * msPerDay).toISOString().slice(0, 10);
+
+        try {
+          const [prevIncomeRes, prevExpenseRes, prevPayrollRes, prevBonusRes] = await Promise.all([
+            supabase.from("incomes").select("amount").gte("date", prevStartDate).lte("date", prevEndDate).range(0, 99999),
+            supabase.from("expenses").select("amount").gte("date", prevStartDate).lte("date", prevEndDate).range(0, 99999),
+            supabase.from("payroll_summary").select("total_pay").gte("week_start", prevStartDate).lte("week_end", prevEndDate).range(0, 99999),
+            supabase.from("payroll_bonuses").select("bonus_amount").gte("week_start", prevStartDate).lte("week_start", prevEndDate).range(0, 99999),
+          ]);
+
+          const sumAmt = (rows, key) => (rows || []).reduce((s, r) => s + Number(r[key] || 0), 0);
+          const prevIncome = sumAmt(prevIncomeRes.data, "amount");
+          const prevExpenses = sumAmt(prevExpenseRes.data, "amount");
+          const prevPayroll = sumAmt(prevPayrollRes.data, "total_pay");
+          const prevBonuses = sumAmt(prevBonusRes.data, "bonus_amount");
+          const prevCompensation = prevPayroll + prevBonuses;
+
+          setPrevTotalIncome(prevIncome);
+          setPrevTotalExpenses(prevExpenses);
+          setPrevTotalCompensation(prevCompensation);
+          setPrevNetProfit(prevIncome - prevExpenses - prevCompensation);
+        } catch (prevErr) {
+          // Best-effort — a failed comparison fetch should just hide the
+          // deltas, not break the dashboard's real totals above.
+          console.warn("Could not compute previous-period totals for KPI deltas:", prevErr);
+          setPrevTotalIncome(null);
+          setPrevTotalExpenses(null);
+          setPrevTotalCompensation(null);
+          setPrevNetProfit(null);
+        }
+      } else {
+        setPrevTotalIncome(null);
+        setPrevTotalExpenses(null);
+        setPrevTotalCompensation(null);
+        setPrevNetProfit(null);
+      }
     } catch (err) {
       console.error(err);
       setErrorMsg(err?.message || "Failed to fetch financial logs.");
@@ -314,6 +373,12 @@ export default function useFinancialLogs(startDate, endDate) {
     totalBonuses,
     totalCompensation,
     netProfit,
+
+    // previous-period totals (null unless a date range is selected)
+    prevTotalIncome,
+    prevTotalExpenses,
+    prevTotalCompensation,
+    prevNetProfit,
 
     // state
     loading,

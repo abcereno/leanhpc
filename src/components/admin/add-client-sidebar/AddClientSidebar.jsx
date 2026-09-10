@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Form } from "react-bootstrap";
 import { supabase } from "../../../supabaseClient";
 import useLogger from "../../../hooks/useLogger";
+import { useConfirm } from "../../shared/ui/ConfirmDialog";
 import { resolveRoundForNewClient, insertClientRecord } from "../../../utils/clientDuplicateRound";
 import { SERVICES } from "../../../utils/services";
 
 export default function AddClientSidebar({ isOpen, onClose, companyId }) {
+  const { confirm } = useConfirm();
   const [form, setForm] = useState({
     full_name: "",
     ssn: "",
@@ -120,7 +122,7 @@ export default function AddClientSidebar({ isOpen, onClose, companyId }) {
 
     // Warn-and-confirm on a returning email instead of silently creating a
     // duplicate — see utils/clientDuplicateRound.js.
-    const disputeRound = await resolveRoundForNewClient(form.email);
+    const disputeRound = await resolveRoundForNewClient(form.email, confirm);
     if (disputeRound === null) {
       setUploading(false);
       return setMessage("Canceled — this email already belongs to an existing client.");

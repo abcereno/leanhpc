@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import { Container, Card, Table, Form, Button, Badge, Spinner, Modal, Nav } from "react-bootstrap";
 import { supabase } from "../../supabaseClient";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import { resolveServiceId, SERVICES } from "../../utils/services";
+import { recomputeProgressFromDocsOrCalls } from "../../utils/progressWeighting";
 import LogDocumentModal from "./client-profile/modals/LogDocumentModal";
 import LogChecklistItemModal from "./client-profile/modals/LogChecklistItemModal";
 
@@ -78,6 +80,7 @@ function BureauCell({ isDone, colorClass, checked, onToggle, onLogDocs, lastDocs
 
 export default function DocumentRouting() {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [tasks, setTasks] = useState([]);
   const [admins, setAdmins] = useState([]);
   const [clientsList, setClientsList] = useState([]); 
@@ -530,7 +533,43 @@ export default function DocumentRouting() {
           // back to unchecked, even though the DB write below is correct —
           // the checkbox would visually revert right after being checked.
           const realId = await ensureRealTask({ ...task, [field]: nextVal });
-          await supabase.from('document_routing').update({ [field]: nextVal }).eq('id', realId);
+
+          // `.select("id")` required to detect a silent-RLS no-op — same
+          // pattern as CoverLetterAssets.jsx/LetterEditorModal.jsx's
+          // runValidation/handleCheckAsset. Without it, a missing UPDATE
+          // policy on document_routing returns `error: null` with 0 rows
+          // actually changed — the checkbox looks saved (optimistic local
+          // update above), but reverts to unchecked on next reload, and
+          // this round would then sit "overdue" forever since FTC/CFPB/
+          // bureau checkboxes never actually persist as checked (see
+          // workflowStage.js's fullySubmitted check).
+          const { data: updated, error: updErr } = await supabase
+            .from('document_routing')
+            .update({ [field]: nextVal })
+            .eq('id', realId)
+            .select('id');
+
+          if (updErr) throw updErr;
+
+          if (!updated || updated.length === 0) {
+            updateTaskLocal(task.id, field, currentVal);
+            addToast({
+              title: "Save Blocked",
+              message: "The checkbox change wasn't saved — the database update matched 0 rows. This usually means a missing Row Level Security UPDATE policy on document_routing, not a network error. It will show as unchecked again after reloading.",
+              variant: "danger",
+              icon: "bi-exclamation-octagon-fill",
+              timeout: 12000,
+            });
+          } else if (field === 'ftc_completed' || field === 'cfpb_completed') {
+            // FTC/CFPB are 2 of the 4 weighted progress components (see
+            // utils/progressWeighting.js) — only this task's OWN client
+            // moved, so recompute just that one client's clients.progress
+            // rather than anything queue-wide. Best-effort: a failure here
+            // shouldn't undo the checkbox save that already succeeded above.
+            recomputeProgressFromDocsOrCalls(task.client_id).catch((e) =>
+              console.warn('Could not recompute progress after FTC/CFPB toggle:', e)
+            );
+          }
       } catch (err) {
           updateTaskLocal(task.id, field, currentVal);
           addToast({ title: "Save Failed", message: "Error saving: " + err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
@@ -541,7 +580,7 @@ export default function DocumentRouting() {
   // 3. SUBMIT TO CALL ROUTING
   const handleSubmit = async (task) => {
     if (!task.ftc_completed || !task.cfpb_completed) {
-        if(!window.confirm("Checklist incomplete. Proceed anyway?")) return;
+        if(!(await confirm("Checklist incomplete. Proceed anyway?"))) return;
     }
     setSavingId(task.id);
 
@@ -583,7 +622,7 @@ export default function DocumentRouting() {
 
   // 👇 NEW: DELETE TASK FROM BOTH QUEUES 👇
   const handleDeleteTask = async (task) => {
-    const confirmDelete = window.confirm(
+    const confirmDelete = await confirm(
       `Are you sure you want to completely remove ${task.clients?.full_name || 'this client'} from the queues?\n\nThis will delete their active routing tasks and mark their bureaus as completed to stop them from auto-queueing.`
     );
     if (!confirmDelete) return;

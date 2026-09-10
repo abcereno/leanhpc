@@ -7,12 +7,15 @@ import {
   Form,
   Table,
   Spinner,
-  Badge,
+  Card,
+  Nav,
+  InputGroup,
 } from "react-bootstrap";
 import useFinancialLogs from "../../hooks/useFinancialLogs";
 import { useAuth } from "../../context/AuthContext";
 import { dayTS, sumInWeek } from "../../utils/weekRangeSum";
 import SearchableSelect from "../shared/ui/SearchableSelect";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import IncomeChart from "./IncomeChart";
 import NetProfitTrend from "./NetProfitTrend";
 import PayrollChart from "./PayrollChart";
@@ -54,8 +57,112 @@ const num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+// Cheap, deterministic string hash — spreads categories across the badge
+// palette below without needing a hand-maintained category -> color map
+// (categories are free-typed on the Add Income/Expense forms, so a fixed
+// map would drift out of date the moment someone types a new one).
+function hashString(str) {
+  let h = 0;
+  const s = String(str || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+// Matches this app's --primary-blue/--accent-gold/--accent-green/
+// --accent-red plus two extra accents from letterTemplate.js's purple/
+// magenta rotation, so category badges read as part of the same theme
+// instead of a separately-invented palette.
+const CATEGORY_COLORS = ["#0EA5E9", "#F59E0B", "#10B981", "#7C1FA0", "#C2007F", "#0891B2"];
+function categoryColor(category) {
+  if (!category) return "#64748B"; // --text-muted, for "Uncategorized"
+  return CATEGORY_COLORS[hashString(category) % CATEGORY_COLORS.length];
+}
+
+function CategoryBadge({ category }) {
+  const color = categoryColor(category);
+  return (
+    <span
+      className="small fw-semibold px-2 py-1"
+      style={{ color, backgroundColor: `${color}22`, borderRadius: 6, whiteSpace: "nowrap" }}
+    >
+      {category || "Uncategorized"}
+    </span>
+  );
+}
+
+function initials(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function Avatar({ name }) {
+  return (
+    <span
+      className="d-inline-flex align-items-center justify-content-center me-2 fw-bold"
+      style={{
+        width: 26,
+        height: 26,
+        borderRadius: "50%",
+        background: "rgba(14, 165, 233, 0.18)",
+        color: "#0EA5E9",
+        fontSize: "0.65rem",
+        verticalAlign: "middle",
+      }}
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
+// Signed percent change, e.g. "+8.2%" / "-3.1%" — null when there's
+// nothing to compare against (no previous-period total, or a zero
+// baseline that would make a percent meaningless).
+function deltaPct(current, previous) {
+  if (previous === null || previous === undefined || previous === 0) return null;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
+
+// `goodDirection: "up"` means an increase is favorable (income, net
+// profit) — colors green on the way up, red on the way down.
+// `goodDirection: "down"` flips that (expenses: less is better).
+// `goodDirection: "neutral"` never colors red/green (payroll headcount
+// cost isn't inherently good or bad on its own).
+function KpiCard({ icon, label, value, previous, goodDirection = "up", sublabel }) {
+  const pct = deltaPct(value, previous);
+  let deltaColor = "text-muted";
+  if (pct !== null && goodDirection !== "neutral") {
+    const favorable = goodDirection === "up" ? pct >= 0 : pct <= 0;
+    deltaColor = favorable ? "text-success" : "text-danger";
+  }
+  return (
+    <Card className="border-0 shadow-sm h-100">
+      <Card.Body>
+        <div className="d-flex align-items-center gap-2 mb-2">
+          <i className={`bi ${icon} text-secondary`}></i>
+          <span className="small text-muted text-uppercase fw-bold">{label}</span>
+        </div>
+        <div className="fs-4 fw-bold">{money(value)}</div>
+        {pct !== null && (
+          <div className={`small mt-1 ${deltaColor}`}>
+            <i className={`bi ${pct >= 0 ? "bi-arrow-up-right" : "bi-arrow-down-right"} me-1`}></i>
+            {Math.abs(pct).toFixed(1)}% vs last period
+          </div>
+        )}
+        {sublabel ? (
+          <div className="small text-muted mt-1">{sublabel}</div>
+        ) : pct === null ? (
+          <div className="small text-muted mt-1">&nbsp;</div>
+        ) : null}
+      </Card.Body>
+    </Card>
+  );
+}
+
 export default function FinancialDashboard() {
   const { userId } = useAuth();
+  const { confirm } = useConfirm();
 
   const [activeTab, setActiveTab] = useState("dashboard");
   const [startDate, setStartDate] = useState("");
@@ -67,6 +174,13 @@ export default function FinancialDashboard() {
   const [showBonusModal, setShowBonusModal] = useState(false);
   const [selectedBonusEntry, setSelectedBonusEntry] = useState(null);
   const [showBonusDetailModal, setShowBonusDetailModal] = useState(false);
+
+  // Income/Expenses tab search + category filter — client-side, over the
+  // already-loaded (date-range-filtered) rows, same "narrow what's already
+  // fetched" pattern DocumentRouting.jsx's serviceFilter uses.
+  const [incomeSearch, setIncomeSearch] = useState("");
+  const [incomeCategory, setIncomeCategory] = useState("");
+  const [expenseSearch, setExpenseSearch] = useState("");
 
   const {
     incomes,
@@ -84,6 +198,12 @@ export default function FinancialDashboard() {
     totalCompensation, // payroll + bonuses
     netProfit,
 
+    // previous-period totals (null unless a date range is selected)
+    prevTotalIncome,
+    prevTotalExpenses,
+    prevTotalCompensation,
+    prevNetProfit,
+
     // state + actions
     loading,
     addIncome,
@@ -95,36 +215,69 @@ export default function FinancialDashboard() {
 
   const [submitting, setSubmitting] = useState(false);
 
-  // ---- Compat shim for charts that used to take `logs`
-  const logsCompat = useMemo(() => {
-    const inc = (incomes || []).map((r) => ({
-      id: r.id,
-      date: r.date,
-      amount: Number(r.amount || 0),
-      log_type: "income",
-      category: r.category || null,
-      source: r.source || null,
-      notes: r.notes || null,
-      client_id: r.client_id || null,
-      employee_id: r.employee_id || null,
-    }));
-    const exp = (expenses || []).map((r) => ({
-      id: r.id,
-      date: r.date,
-      amount: Number(r.amount || 0),
-      log_type: "expense",
-      category: r.category || null,
-      notes: r.notes || null,
-      vendor: r.vendor || null,
-      employee_id: r.employee_id || null,
-      company_id: r.company_id || null,
-    }));
-    return [...inc, ...exp].sort((a, b) => (a.date > b.date ? 1 : -1));
-  }, [incomes, expenses]);
-
   // derived rows for tabs
   const incomeRows = useMemo(() => incomes, [incomes]);
   const expenseRows = useMemo(() => expenses, [expenses]);
+
+  const incomeCategories = useMemo(
+    () => [...new Set((incomes || []).map((r) => r.category).filter(Boolean))].sort(),
+    [incomes]
+  );
+
+  const filteredIncomeRows = useMemo(() => {
+    const q = incomeSearch.trim().toLowerCase();
+    return incomeRows.filter((r) => {
+      if (incomeCategory && r.category !== incomeCategory) return false;
+      if (!q) return true;
+      const haystack = `${r.client?.full_name || r.client_name || ""} ${r.source || ""} ${r.notes || ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [incomeRows, incomeSearch, incomeCategory]);
+
+  const filteredExpenseRows = useMemo(() => {
+    const q = expenseSearch.trim().toLowerCase();
+    if (!q) return expenseRows;
+    return expenseRows.filter((r) => {
+      const haystack = `${r.vendor || ""} ${r.category || ""} ${r.notes || ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [expenseRows, expenseSearch]);
+
+  // Recent Activity feed (Overview tab) — incomes, expenses, and bonuses
+  // merged into one reverse-chronological list, capped at 8, so staff can
+  // see what just happened across all three without switching tabs. Each
+  // source already carries its own `date`/`week_start` — normalized here
+  // to a single `date` field for sorting.
+  const recentActivity = useMemo(() => {
+    const inc = (incomes || []).map((r) => ({
+      id: `inc-${r.id}`,
+      date: r.date,
+      kind: "income",
+      title: r.client?.full_name || r.client_name || r.source || "Income",
+      subtitle: r.source || r.category || "Income",
+      amount: Number(r.amount || 0),
+    }));
+    const exp = (expenses || []).map((r) => ({
+      id: `exp-${r.id}`,
+      date: r.date,
+      kind: "expense",
+      title: r.vendor || r.category || "Expense",
+      subtitle: r.category || "Expense",
+      amount: -Number(r.amount || 0),
+    }));
+    const bon = (bonuses || []).map((b) => ({
+      id: `bon-${b.id}`,
+      date: b.week_start,
+      kind: "bonus",
+      title: `${b.profiles?.full_name || "Employee"} — bonus`,
+      subtitle: b.reason || "Bonus",
+      amount: Number(b.bonus_amount || 0),
+    }));
+    return [...inc, ...exp, ...bon]
+      .filter((r) => r.date)
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .slice(0, 8);
+  }, [incomes, expenses, bonuses]);
 
   // Add Income's client picker needs plain { value, label } options
   const clientOptions = useMemo(
@@ -191,6 +344,14 @@ export default function FinancialDashboard() {
     setEndDate(iso(end));
   };
 
+  const TABS = [
+    { key: "dashboard", label: "Overview", icon: "bi-speedometer2" },
+    { key: "income", label: "Income", icon: "bi-graph-up-arrow" },
+    { key: "payroll", label: "Payroll", icon: "bi-people" },
+    { key: "expenses", label: "Expenses", icon: "bi-credit-card" },
+    { key: "bonuses", label: "Bonuses", icon: "bi-gift" },
+  ];
+
   return (
     <div className="container mt-4">
       {/* Date Filters */}
@@ -241,82 +402,97 @@ export default function FinancialDashboard() {
         </Col>
       </Row>
 
+      {/* KPI Summary Cards — deltas only show once a date range is picked
+          (a "previous period" for "All time" isn't a coherent comparison,
+          see useFinancialLogs.js's prevTotal* fields). */}
+      <Row className="g-3 mb-4">
+        <Col xs={6} md={3}>
+          <KpiCard icon="bi-arrow-up-right-circle" label="Total Income" value={totalIncome} previous={prevTotalIncome} goodDirection="up" />
+        </Col>
+        <Col xs={6} md={3}>
+          <KpiCard icon="bi-arrow-down-right-circle" label="Total Expenses" value={totalExpenses} previous={prevTotalExpenses} goodDirection="down" />
+        </Col>
+        <Col xs={6} md={3}>
+          <KpiCard
+            icon="bi-people"
+            label="Payroll + Bonuses"
+            value={totalCompensation}
+            previous={prevTotalCompensation}
+            goodDirection="neutral"
+            sublabel={`Base: ${money(totalPayroll)} • Bonuses: ${money(totalBonuses)}`}
+          />
+        </Col>
+        <Col xs={6} md={3}>
+          <KpiCard icon="bi-cash-coin" label="Net Profit" value={netProfit} previous={prevNetProfit} goodDirection="up" />
+        </Col>
+      </Row>
+
       {/* Tabs */}
-      <ul className="nav nav-tabs mb-4">
-        {["dashboard", "income", "payroll", "expenses", "bonuses"].map(
-          (tab) => (
-            <li className="nav-item" key={tab}>
-              <button
-                className={`nav-link ${activeTab === tab ? "active" : ""}`}
-                onClick={() => setActiveTab(tab)}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </button>
-            </li>
-          )
-        )}
-      </ul>
+      <Nav variant="tabs" className="dark-tabs mb-4" activeKey={activeTab} onSelect={(k) => setActiveTab(k)}>
+        {TABS.map((t) => (
+          <Nav.Item key={t.key}>
+            <Nav.Link eventKey={t.key}>
+              <i className={`bi ${t.icon} me-1`}></i>
+              {t.label}
+            </Nav.Link>
+          </Nav.Item>
+        ))}
+      </Nav>
 
       {/* Dashboard Tab */}
       {activeTab === "dashboard" && (
         <>
-          <Row className="mb-4">
-            <Col md={3}>
-              <h6 className="mb-1 text-muted">Total Income</h6>
-              <h4>{money(totalIncome)}</h4>
-            </Col>
-            <Col md={3}>
-              <h6 className="mb-1 text-muted">Total Expenses</h6>
-              <h4>{money(totalExpenses)}</h4>
-            </Col>
-            <Col md={3}>
-              <h6 className="mb-1 text-muted">Total Payroll (incl. Bonuses)</h6>
-              <h4>{money(totalCompensation)}</h4>
-              <small className="text-muted">
-                Base: {money(totalPayroll)} • Bonuses: {money(totalBonuses)}
-              </small>
-            </Col>
-            <Col md={3}>
-              <h6 className="mb-1 text-muted">Net Profit</h6>
-              <h4>
-                <Badge bg={netProfit >= 0 ? "success" : "danger"}>
-                  {money(netProfit)}
-                </Badge>
-              </h4>
-              <small className="text-muted">Net includes bonuses</small>
-            </Col>
-          </Row>
-
           {loading ? (
             <div className="d-flex justify-content-center py-5">
               <Spinner animation="border" />
             </div>
           ) : (
             <>
-              <Row className="mt-4 mb-4 d-flex justify-content-center">
-                <Col md={6}>
-                  <ExpensesChart expenses={expenseRows} logs={logsCompat} />
+              <Row className="g-3 mb-3">
+                <Col md={7}>
+                  <IncomeChart totalIncome={totalIncome} totalExpenses={totalExpenses} totalPayroll={totalCompensation} />
+                </Col>
+                <Col md={5}>
+                  <ExpensesChart expenses={expenseRows} />
+                </Col>
+              </Row>
+              <Row className="g-3 mb-3">
+                <Col md={7}>
+                  <NetProfitTrend payroll={payroll} incomes={incomeRows} expenses={expenseRows} bonuses={bonuses} />
+                </Col>
+                <Col md={5}>
+                  <Card className="border-0 shadow-sm h-100">
+                    <Card.Body>
+                      <div className="fw-bold small text-uppercase text-muted mb-3">Recent Activity</div>
+                      {recentActivity.length === 0 ? (
+                        <div className="text-muted small text-center py-5">Nothing logged in this range yet.</div>
+                      ) : (
+                        <div>
+                          {recentActivity.map((r) => (
+                            <div key={r.id} className="d-flex align-items-center gap-2 py-2 border-bottom border-secondary border-opacity-25">
+                              <i
+                                className={`bi ${
+                                  r.kind === "income" ? "bi-arrow-up-right-circle-fill text-success" :
+                                  r.kind === "expense" ? "bi-arrow-down-right-circle-fill text-danger" :
+                                  "bi-gift-fill text-warning"
+                                }`}
+                              ></i>
+                              <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                                <div className="small fw-semibold text-truncate">{r.title}</div>
+                                <div className="small text-muted text-truncate">{r.date} • {r.subtitle}</div>
+                              </div>
+                              <div className={`small fw-bold ${r.amount >= 0 ? "text-success" : "text-danger"}`}>
+                                {r.amount >= 0 ? "+" : "-"}{money(Math.abs(r.amount))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Card.Body>
+                  </Card>
                 </Col>
               </Row>
               <Row>
-                <Col md={6}>
-                  <IncomeChart
-                    totalIncome={totalIncome}
-                    totalExpenses={totalExpenses}
-                    totalPayroll={totalCompensation} // use payroll + bonuses
-                    logs={logsCompat}
-                  />
-                </Col>
-                <Col md={6}>
-                  <NetProfitTrend
-                    payroll={payroll}
-                    incomes={incomeRows}
-                    expenses={expenseRows}
-                    bonuses={bonuses}
-                  />
-                </Col>
-              </Row>
-              <Row className="mt-4">
                 <Col>
                   <PayrollChart payroll={payroll} />
                 </Col>
@@ -329,24 +505,30 @@ export default function FinancialDashboard() {
       {/* Income Tab */}
       {activeTab === "income" && (
         <>
-          <Button
-            className="mb-3"
-            onClick={() => setShowIncomeModal(true)}
-            disabled={loading}
-          >
-            + Add Income
-          </Button>
+          <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
+            <InputGroup style={{ maxWidth: 280 }}>
+              <InputGroup.Text><i className="bi bi-search"></i></InputGroup.Text>
+              <Form.Control
+                placeholder="Search client or source…"
+                value={incomeSearch}
+                onChange={(e) => setIncomeSearch(e.target.value)}
+              />
+            </InputGroup>
+            <Form.Select style={{ maxWidth: 220 }} value={incomeCategory} onChange={(e) => setIncomeCategory(e.target.value)}>
+              <option value="">All categories</option>
+              {incomeCategories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Form.Select>
+            <Button className="ms-auto" onClick={() => setShowIncomeModal(true)} disabled={loading}>
+              <i className="bi bi-plus-lg me-1"></i>Add Income
+            </Button>
+          </div>
           {loading ? (
             <Spinner animation="border" size="sm" />
           ) : (
-            <>
-              <IncomeChart
-                totalIncome={totalIncome}
-                totalExpenses={totalExpenses}
-                totalPayroll={totalCompensation} // use payroll + bonuses
-                logs={logsCompat}
-              />
-              <Table striped bordered hover className="mt-3">
+            <Card className="border-0 shadow-sm">
+              <Table hover responsive className="align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -358,38 +540,44 @@ export default function FinancialDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {incomeRows.map((r) => (
-                    <tr key={r.id}>
-                      <td>{r.date}</td>
-                      <td>
-                        {/* incomes query already embeds client:client_id, so
-                            read it directly instead of re-searching the
-                            separate `clients` list fetch — one source of
-                            truth, and immune to the two queries ever
-                            drifting out of sync. */}
-                        {r.client?.full_name || r.client_name || "—"}
-                      </td>
-                      <td>{r.category || "—"}</td>
-                      <td>{r.source || "—"}</td>
-                      <td>{money(r.amount)}</td>
-                      <td>
-                        <Button
-                          variant="outline-danger"
-                          size="sm"
-                          onClick={async () => {
-                            if (window.confirm("Delete this income entry?")) {
-                              await deleteIncome(r.id);
-                            }
-                          }}
-                        >
-                          Delete
-                        </Button>
-                      </td>
+                  {filteredIncomeRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center text-muted py-4">No income entries match this filter.</td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredIncomeRows.map((r) => (
+                      <tr key={r.id}>
+                        <td>{r.date}</td>
+                        <td>
+                          {/* incomes query already embeds client:client_id, so
+                              read it directly instead of re-searching the
+                              separate `clients` list fetch — one source of
+                              truth, and immune to the two queries ever
+                              drifting out of sync. */}
+                          {r.client?.full_name || r.client_name || "—"}
+                        </td>
+                        <td><CategoryBadge category={r.category} /></td>
+                        <td>{r.source || "—"}</td>
+                        <td className="fw-semibold text-success">{money(r.amount)}</td>
+                        <td>
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            onClick={async () => {
+                              if (await confirm("Delete this income entry?")) {
+                                await deleteIncome(r.id);
+                              }
+                            }}
+                          >
+                            <i className="bi bi-trash"></i>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </Table>
-            </>
+            </Card>
           )}
         </>
       )}
@@ -397,70 +585,70 @@ export default function FinancialDashboard() {
       {/* Payroll Tab */}
       {activeTab === "payroll" && (
         <>
-          <PayrollChart payroll={payroll} />
           {loading ? (
             <p className="mt-3">Loading…</p>
           ) : payroll.length === 0 ? (
             <p className="mt-3">No payroll records found.</p>
           ) : (
-            <Table striped bordered hover className="mt-3">
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Total Hours</th>
-                  <th>Rate/Hour</th>
-                  <th>Total Pay</th>
-                  <th>Bonuses</th>
-                  <th>Week</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payroll.map((entry) => {
-                  const bonusSum = sumBonusesFor(
-                    entry.employee_id,
-                    entry.week_start,
-                    entry.week_end
-                  );
-                  return (
-                    <tr key={entry.id}>
-                      <td>{entry.profiles?.full_name || entry.employee_id}</td>
-                      <td>{num(entry.total_hours).toFixed(2)}</td>
-                      <td>{money(entry.rate_per_hour)}</td>
-                      <td>{money(entry.total_pay)}</td>
-                      <td>
-                        <div>
-                          <strong>{money(bonusSum)}</strong>
-                        </div>
-                        <div>
-                          <Button
-                            variant="link"
-                            size="sm"
-                            className="p-0 text-muted"
-                            style={{ fontSize: "0.8rem" }}
-                            onClick={() => {
-                              setSelectedBonusEntry({
-                                employee_id: entry.employee_id,
-                                employee_name:
-                                  entry.profiles?.full_name ||
-                                  entry.employee_id,
-                                week_start: entry.week_start,
-                                week_end: entry.week_end, // include week_end for range filtering
-                              });
-                              setShowBonusDetailModal(true);
-                            }}
-                          >
-                            view bonuses
-                          </Button>
-                        </div>
-                      </td>
-                      <td>
-                        {entry.week_start} / {entry.week_end}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </Table>
+            <Card className="border-0 shadow-sm">
+              <Table hover responsive className="align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Total Hours</th>
+                    <th>Rate/Hour</th>
+                    <th>Total Pay</th>
+                    <th>Bonuses</th>
+                    <th>Week</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payroll.map((entry) => {
+                    const bonusSum = sumBonusesFor(
+                      entry.employee_id,
+                      entry.week_start,
+                      entry.week_end
+                    );
+                    const employeeName = entry.profiles?.full_name || entry.employee_id;
+                    return (
+                      <tr key={entry.id}>
+                        <td><Avatar name={employeeName} />{employeeName}</td>
+                        <td>{num(entry.total_hours).toFixed(2)}</td>
+                        <td>{money(entry.rate_per_hour)}</td>
+                        <td className="fw-semibold">{money(entry.total_pay)}</td>
+                        <td>
+                          <div>
+                            <strong>{money(bonusSum)}</strong>
+                          </div>
+                          <div>
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="p-0 text-muted"
+                              style={{ fontSize: "0.8rem" }}
+                              onClick={() => {
+                                setSelectedBonusEntry({
+                                  employee_id: entry.employee_id,
+                                  employee_name: employeeName,
+                                  week_start: entry.week_start,
+                                  week_end: entry.week_end, // include week_end for range filtering
+                                });
+                                setShowBonusDetailModal(true);
+                              }}
+                            >
+                              view bonuses
+                            </Button>
+                          </div>
+                        </td>
+                        <td className="text-muted small">
+                          {entry.week_start} / {entry.week_end}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </Card>
           )}
         </>
       )}
@@ -468,21 +656,25 @@ export default function FinancialDashboard() {
       {/* Expenses Tab */}
       {activeTab === "expenses" && (
         <>
-          <Button
-            className="mb-3"
-            onClick={() => setShowExpenseModal(true)}
-            disabled={loading}
-          >
-            + Add Expense
-          </Button>
+          <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
+            <InputGroup style={{ maxWidth: 280 }}>
+              <InputGroup.Text><i className="bi bi-search"></i></InputGroup.Text>
+              <Form.Control
+                placeholder="Search vendor or category…"
+                value={expenseSearch}
+                onChange={(e) => setExpenseSearch(e.target.value)}
+              />
+            </InputGroup>
+            <Button className="ms-auto" onClick={() => setShowExpenseModal(true)} disabled={loading}>
+              <i className="bi bi-plus-lg me-1"></i>Add Expense
+            </Button>
+          </div>
 
           {loading ? (
             <Spinner animation="border" size="sm" />
           ) : (
-            <>
-              <ExpensesChart expenses={expenseRows} logs={logsCompat} />
-
-              <Table striped bordered hover className="mt-3">
+            <Card className="border-0 shadow-sm">
+              <Table hover responsive className="align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -495,20 +687,20 @@ export default function FinancialDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {expenseRows.length === 0 ? (
+                  {filteredExpenseRows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center text-muted">
-                        No expenses found.
+                      <td colSpan={7} className="text-center text-muted py-4">
+                        {expenseRows.length === 0 ? "No expenses found." : "No expenses match this filter."}
                       </td>
                     </tr>
                   ) : (
-                    expenseRows.map((r) => (
+                    filteredExpenseRows.map((r) => (
                       <tr key={r.id}>
                         <td>{r.date}</td>
-                        <td>{r.category || "—"}</td>
+                        <td><CategoryBadge category={r.category} /></td>
                         <td>{r.vendor || "—"}</td>
-                        <td>{money(r.amount)}</td>
-                        <td>{r.notes || "—"}</td>
+                        <td className="fw-semibold text-danger">{money(r.amount)}</td>
+                        <td className="text-muted small">{r.notes || "—"}</td>
                         <td>
                           {/* expenses query already embeds employee:employee_id,
                               same reasoning as the income row's client column above. */}
@@ -520,13 +712,13 @@ export default function FinancialDashboard() {
                             size="sm"
                             onClick={async () => {
                               if (
-                                window.confirm("Delete this expense entry?")
+                                await confirm("Delete this expense entry?")
                               ) {
                                 await deleteExpense(r.id);
                               }
                             }}
                           >
-                            Delete
+                            <i className="bi bi-trash"></i>
                           </Button>
                         </td>
                       </tr>
@@ -534,7 +726,7 @@ export default function FinancialDashboard() {
                   )}
                 </tbody>
               </Table>
-            </>
+            </Card>
           )}
         </>
       )}
@@ -542,38 +734,41 @@ export default function FinancialDashboard() {
       {/* Bonuses Tab */}
       {activeTab === "bonuses" && (
         <>
-          <Button
-            className="mb-3"
-            onClick={() => setShowBonusModal(true)}
-            disabled={loading}
-          >
-            + Add Bonus
-          </Button>
+          <div className="mb-3">
+            <Button onClick={() => setShowBonusModal(true)} disabled={loading}>
+              <i className="bi bi-plus-lg me-1"></i>Add Bonus
+            </Button>
+          </div>
           {bonuses.length === 0 ? (
             <p>No bonus entries found.</p>
           ) : (
-            <Table striped bordered hover>
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Bonus Amount</th>
-                  <th>Week Start</th>
-                  <th>Reason</th>
-                  <th>Logged</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bonuses.map((bonus) => (
-                  <tr key={bonus.id}>
-                    <td>{bonus.profiles?.full_name || bonus.employee_id}</td>
-                    <td>{money(bonus.bonus_amount)}</td>
-                    <td>{bonus.week_start}</td>
-                    <td>{bonus.reason}</td>
-                    <td>{new Date(bonus.created_at).toLocaleString()}</td>
+            <Card className="border-0 shadow-sm">
+              <Table hover responsive className="align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Bonus Amount</th>
+                    <th>Week Start</th>
+                    <th>Reason</th>
+                    <th>Logged</th>
                   </tr>
-                ))}
-              </tbody>
-            </Table>
+                </thead>
+                <tbody>
+                  {bonuses.map((bonus) => {
+                    const employeeName = bonus.profiles?.full_name || bonus.employee_id;
+                    return (
+                      <tr key={bonus.id}>
+                        <td><Avatar name={employeeName} />{employeeName}</td>
+                        <td className="fw-semibold text-warning">{money(bonus.bonus_amount)}</td>
+                        <td>{bonus.week_start}</td>
+                        <td className="text-muted small">{bonus.reason}</td>
+                        <td className="text-muted small">{new Date(bonus.created_at).toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            </Card>
           )}
         </>
       )}

@@ -29,6 +29,7 @@ import { supabase } from "../../supabaseClient";
 import { resolveRoundForNewClient, insertClientRecord } from "../../utils/clientDuplicateRound";
 import { runReportAutoImport } from "../../utils/reportAutoImport";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 
 const REPORT_METHODS = [
   { key: "smartcredit", label: "SmartCredit Login" },
@@ -39,6 +40,7 @@ const REPORT_METHODS = [
 export default function NewLeadForm({ show, handleClose, onClientAdded }) {
   const { companyId, user, isAgent } = useCompanyAuth();
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
 
   const [form, setForm] = useState({ first_name: "", last_name: "", email: "", phone: "" });
   const [reportMethod, setReportMethod] = useState(null);
@@ -79,7 +81,7 @@ export default function NewLeadForm({ show, handleClose, onClientAdded }) {
     try {
       const fullName = `${form.first_name.trim()} ${form.last_name.trim()}`.toUpperCase();
 
-      const disputeRound = await resolveRoundForNewClient(form.email);
+      const disputeRound = await resolveRoundForNewClient(form.email, confirm);
       if (disputeRound === null) {
         setMessage("Canceled — this email already belongs to an existing client.");
         setSubmitting(false);

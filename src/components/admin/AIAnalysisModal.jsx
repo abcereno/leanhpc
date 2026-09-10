@@ -3,6 +3,7 @@ import { Modal, Button, Table, Badge, Spinner, Alert, Form } from "react-bootstr
 import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 
 // --- CONFIG & UTILS ---
 const BUCKET = "clients";
@@ -12,6 +13,7 @@ const generateId = () => crypto.randomUUID ? crypto.randomUUID() : Math.random()
 
 export default function AIAnalysisModal({ show, onClose, clientId, onUpdateSuccess }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const { userId } = useAuth();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -113,8 +115,8 @@ const runAnalysis = async () => {
     ));
   };
 
-  const handleAcceptAll = () => {
-      if(!window.confirm("This will update all inquiries to match the AI suggestions. Continue?")) return;
+  const handleAcceptAll = async () => {
+      if(!(await confirm("This will update all inquiries to match the AI suggestions. Continue?"))) return;
       setAnalyzedData(prev => prev.map(item => ({
           ...item,
           new_status: item.ai_suggestion

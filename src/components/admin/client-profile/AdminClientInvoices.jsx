@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../../supabaseClient";
 import useLogger from "../../../hooks/useLogger";
 import { Card, Badge, Button, Spinner, Alert } from "react-bootstrap";
+import { useConfirm } from "../../shared/ui/ConfirmDialog";
 
 // 👇 Added refreshKey to props 👇
 export default function AdminClientInvoices({ clientId, refreshKey }) {
@@ -10,6 +11,7 @@ export default function AdminClientInvoices({ clientId, refreshKey }) {
   const [processingId, setProcessingId] = useState(null);
   const [message, setMessage] = useState("");
   const logAction = useLogger();
+  const { confirm } = useConfirm();
 
   const fetchInvoices = async () => {
     setLoading(true);
@@ -39,7 +41,7 @@ export default function AdminClientInvoices({ clientId, refreshKey }) {
   }, [clientId, refreshKey]);
 
   const handleApprovePayment = async (invoice) => {
-    if (!window.confirm(`Are you sure you want to mark Invoice ${invoice.invoice_number} as PAID?`)) return;
+    if (!(await confirm(`Are you sure you want to mark Invoice ${invoice.invoice_number} as PAID?`))) return;
 
     setProcessingId(invoice.id);
     setMessage("");

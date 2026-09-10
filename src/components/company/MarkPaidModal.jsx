@@ -15,20 +15,33 @@ import { supabase } from "../../supabaseClient";
 import { SERVICES } from "../../utils/services";
 import { markClientPaid } from "../../utils/markClientPaid";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 
 export default function MarkPaidModal({ show, handleClose, client, onDone }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [serviceId, setServiceId] = useState(client?.service_id || "");
+  const [amount, setAmount] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   if (!client) return null;
+
+  const numericAmount = Number(amount);
+  const amountValid = amount !== "" && Number.isFinite(numericAmount) && numericAmount > 0;
 
   const handleSubmit = async () => {
     if (!serviceId) {
       addToast({ title: "Service Required", message: "Choose a service before marking this client paid.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
       return;
     }
-    if (!window.confirm(`Mark ${client.full_name} as paid? This starts their case immediately.`)) return;
+    // Amount paid is required — see markClientPaid.js's amount param,
+    // which auto-records this as income so it shows up on the Financial
+    // Dashboard without a separate manual "Add Income" step.
+    if (!amountValid) {
+      addToast({ title: "Amount Required", message: "Enter how much this client paid before marking them paid.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
+      return;
+    }
+    if (!(await confirm(`Mark ${client.full_name} as paid ($${numericAmount.toFixed(2)})? This starts their case immediately.`))) return;
 
     setSubmitting(true);
     try {
@@ -42,7 +55,7 @@ export default function MarkPaidModal({ show, handleClose, client, onDone }) {
         if (updateErr) throw updateErr;
       }
 
-      const { error: paidErr } = await markClientPaid(client.id, { ...client, dispute_method: service.disputeMethod });
+      const { error: paidErr } = await markClientPaid(client.id, { ...client, dispute_method: service.disputeMethod }, { amount: numericAmount });
       if (paidErr) throw paidErr;
 
       addToast({ title: "Marked Paid", message: `${client.full_name} is now paid and in the ${service.label} queue.`, variant: "success", icon: "bi-check-circle" });
@@ -71,14 +84,25 @@ export default function MarkPaidModal({ show, handleClose, client, onDone }) {
           in later from their profile.
         </p>
         <Form.Label className="fw-semibold">Service *</Form.Label>
-        <Form.Select value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
+        <Form.Select value={serviceId} onChange={(e) => setServiceId(e.target.value)} className="mb-3">
           <option value="">Select a service</option>
           {SERVICES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
         </Form.Select>
+
+        <Form.Label className="fw-semibold">Amount Paid *</Form.Label>
+        <Form.Control
+          type="number"
+          step="0.01"
+          min="0.01"
+          placeholder="0.00"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <Form.Text className="text-muted">Recorded automatically as income once this client is marked paid.</Form.Text>
       </Modal.Body>
       <Modal.Footer>
         <Button variant="outline-secondary" onClick={handleClose} disabled={submitting}>Cancel</Button>
-        <Button variant="success" className="fw-bold" onClick={handleSubmit} disabled={submitting || !serviceId}>
+        <Button variant="success" className="fw-bold" onClick={handleSubmit} disabled={submitting || !serviceId || !amountValid}>
           {submitting ? <><Spinner size="sm" className="me-2" />Marking Paid…</> : "Mark Paid"}
         </Button>
       </Modal.Footer>

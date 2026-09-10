@@ -31,7 +31,7 @@ export default function useClientNotes(clientId) {
     try {
       const { data, error: err } = await supabase
         .from("client_notes")
-        .select("id, client_id, note_type, is_pinned, author_id, author_name, text, created_at")
+        .select("id, client_id, note_type, is_pinned, author_id, author_name, text, created_at, gap_key")
         .eq("client_id", clientId)
         .order("is_pinned", { ascending: false })
         .order("created_at", { ascending: false });
@@ -54,8 +54,11 @@ export default function useClientNotes(clientId) {
     reload();
   }, [reload]);
 
+  // `gapKey` tags this note as the reason for a specific Operational
+  // Timeline gap (ClientSummaryModal.jsx) rather than an ordinary Manager
+  // Note — see src/utils/timelineGapNotes.js. Omit/null for a normal note.
   const addNote = useCallback(
-    async (text, noteType = "internal", pinned = false) => {
+    async (text, noteType = "internal", pinned = false, gapKey = null) => {
       if (!clientId || !text?.trim()) return { success: false };
       const { data, error: err } = await supabase
         .from("client_notes")
@@ -66,6 +69,7 @@ export default function useClientNotes(clientId) {
           text: text.trim(),
           author_id: userId,
           author_name: fullName,
+          gap_key: gapKey || null,
         })
         .select()
         .single();

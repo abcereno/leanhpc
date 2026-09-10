@@ -22,6 +22,7 @@ import { Card, Badge, Button, Spinner, OverlayTrigger, Tooltip, Dropdown } from 
 import { supabase } from "../../../supabaseClient";
 import { validateDocument } from "../../../utils/validateDocument";
 import { useToast } from "../../shared/ui/ToastNotifier";
+import { useConfirm } from "../../shared/ui/ConfirmDialog";
 import { useAlignmentDocs } from "../../../hooks/useAlignmentDocs";
 import { useAuth } from "../../../context/AuthContext";
 import { buildAiDetectedLines } from "../../../utils/documentAssetLabels";
@@ -64,6 +65,7 @@ function MatchBadge({ label, value }) {
 
 export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const { fullName: adminName } = useAuth();
   const [client, setClient] = useState(null);
   const [checkingId, setCheckingId] = useState(null); // row id (or 'license'/'ssn'/'poa') currently being checked
@@ -190,7 +192,7 @@ export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh })
   const overrideStatus = async (row, checkKey, status) => {
     if (!row) return;
     const label = OVERRIDE_STATUS_LABELS[status] || status;
-    if (!window.confirm(`Mark this document as "${label}"? This overrides the AI result and will be recorded as a manual override.`)) return;
+    if (!(await confirm(`Mark this document as "${label}"? This overrides the AI result and will be recorded as a manual override.`))) return;
 
     setOverridingId(checkKey);
     try {

@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../supabaseClient";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import { Tabs, Tab, Table, Spinner, Form, Button } from "react-bootstrap";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 
 export default function PendingCallbacks() {
+  const { confirm } = useConfirm();
   const [clients, setClients] = useState({ exp: [], tu: [], eq: [] });
   const [loading, setLoading] = useState(true);
   const [marked, setMarked] = useState({});
@@ -379,7 +381,7 @@ const renderTable = (rows, bureau) => {
   };
 
   const clearAllMarks = async () => {
-    if (!window.confirm("This will clear all marks for all admins. Continue?")) return;
+    if (!(await confirm("This will clear all marks for all admins. Continue?"))) return;
     const { error } = await supabase
       .from("marked_clients")
       .update({ is_marked: false })

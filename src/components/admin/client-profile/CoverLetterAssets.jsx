@@ -3,6 +3,7 @@ import { Dropdown } from "react-bootstrap";
 import { supabase } from "../../../supabaseClient";
 import useLogger from "../../../hooks/useLogger";
 import { useToast } from "../../shared/ui/ToastNotifier";
+import { useConfirm } from "../../shared/ui/ConfirmDialog";
 import { useAuth } from "../../../context/AuthContext";
 import { validateDocument } from "../../../utils/validateDocument";
 import { ASSET_KEYS as KEYS, ASSET_LABELS, VALIDATION_BADGES, buildAiDetectedLines } from "../../../utils/documentAssetLabels";
@@ -49,6 +50,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
 
   const logAction = useLogger();
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const { fullName: adminName } = useAuth();
   const mounted = useRef(true);
 
@@ -379,7 +381,7 @@ export default function CoverLetterAssets({ clientId, onChange, refreshKey, show
   async function handleOverride(key, status) {
     if (!clientId || !assets[key]?.path) return;
     const label = OVERRIDE_STATUS_LABELS[status] || status;
-    if (!window.confirm(`Mark this document as "${label}"? This overrides the AI result and will be recorded as a manual override.`)) return;
+    if (!(await confirm(`Mark this document as "${label}"? This overrides the AI result and will be recorded as a manual override.`))) return;
 
     setOverridingKeys((prev) => ({ ...prev, [key]: true }));
     try {

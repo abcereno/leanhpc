@@ -13,6 +13,7 @@
 // never enters the self-healing docs/calls workflow at all.
 import { supabase } from "../supabaseClient";
 import { sendWebhook } from "../hooks/useWebhookSender";
+import { SERVICES } from "./services";
 
 const PAID_WEBHOOKS = [
   "https://services.leadconnectorhq.com/hooks/rqr5oOzXxiHjh8wSS7T2/webhook-trigger/775e674e-e9dd-43df-852f-574865edcc84",
@@ -22,12 +23,21 @@ const PAID_WEBHOOKS = [
 /**
  * Marks a client paid: resets bureau statuses to NEW/incomplete, creates
  * the client's first Document Routing round if one doesn't already exist,
- * and fires the paid webhooks. `client` needs at least `full_name`, `email`,
- * `phone`, `agent`, `admin_id`. Returns `{ error }` (never throws — webhook
- * failures are logged, not surfaced, matching the original behavior in
- * useClientActions.js).
+ * fires the paid webhooks, and — when `amount` is given — records the
+ * payment in `incomes` so it shows up on the Financial Dashboard without a
+ * separate manual "Add Income" step. `client` needs at least `full_name`,
+ * `email`, `phone`, `agent`, `admin_id`. Returns `{ error }` (never throws —
+ * webhook failures are logged, not surfaced, matching the original
+ * behavior in useClientActions.js).
+ *
+ * `amount` is optional here (not every caller has collected one yet — see
+ * each call site's own required-field validation), but every UI surface
+ * that lets a human manually mark a client paid should be requiring and
+ * passing it. AdminPaymentVerifications.jsx already has a verified amount
+ * on the payment_verifications row itself, so it passes that straight
+ * through instead of asking a second time.
  */
-export async function markClientPaid(clientId, client, { triggerSource = "manual_mark_paid" } = {}) {
+export async function markClientPaid(clientId, client, { triggerSource = "manual_mark_paid", amount = null } = {}) {
   const now = new Date().toISOString();
 
   const { error } = await supabase.from("clients").update({
@@ -45,6 +55,30 @@ export async function markClientPaid(clientId, client, { triggerSource = "manual
       client_id: clientId, round_count: 1, status: "PENDING",
       assigned_admin_id: client.admin_id || null,
     });
+  }
+
+  // Auto-record the payment as income — best-effort: a failure here
+  // shouldn't undo the paid flag or block the rest of this function, so
+  // it's logged rather than thrown (same non-throwing contract as the
+  // webhook sends below).
+  const numericAmount = Number(amount);
+  if (Number.isFinite(numericAmount) && numericAmount > 0) {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const service = SERVICES.find((s) => s.disputeMethod?.toLowerCase() === String(client.dispute_method || "").toLowerCase());
+      const { error: incomeErr } = await supabase.from("incomes").insert({
+        client_id: clientId,
+        employee_id: userData?.user?.id || null,
+        amount: numericAmount,
+        date: now.slice(0, 10),
+        source: "Client Payment",
+        category: service?.label || null,
+        notes: `Auto-recorded when marked paid (${triggerSource}).`,
+      });
+      if (incomeErr) console.error("Failed to auto-record income for paid client:", incomeErr.message);
+    } catch (incomeErr) {
+      console.error("Unexpected error auto-recording income for paid client:", incomeErr);
+    }
   }
 
   // Re-fetched fresh rather than trusting client.company_id — callers don't

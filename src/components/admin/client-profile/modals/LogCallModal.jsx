@@ -6,6 +6,7 @@ import { getESTDate } from "../../../../utils/timezone";
 import { useBureauWebhookDispatcher } from "../../../../hooks/useBureauWebhookDispatcher";
 import { useClient } from "../../../../hooks/useClient";
 import { useToast } from "../../../shared/ui/ToastNotifier";
+import { recomputeProgressFromDocsOrCalls } from "../../../../utils/progressWeighting";
 
 const IS_DEFINITIVE_RESULT = ["DELETED", "DOCUMENTS NOT YET RECEIVED", "DISPUTED", "INVALID FTC", "STILL UNDER DISPUTE", "PARTLY DISPUTED"];
 
@@ -134,6 +135,16 @@ export default function LogCallModal({ show, onClose, clientId, routingTaskId = 
       // ------------------------------
 
       await handleWorkflowSideEffects(b, callLog[`${b}_result`]);
+
+      // Calls credit is 1 of the 4 weighted progress components (see
+      // utils/progressWeighting.js) — any logged call (regardless of
+      // outcome) counts as "this bureau was called," so recompute right
+      // after the insert above. Best-effort: recomputeProgressFromDocsOrCalls
+      // already swallows its own errors and no-ops if the migration hasn't
+      // run, so this can't block the call log from finishing.
+      recomputeProgressFromDocsOrCalls(clientId).catch((e) =>
+        console.warn("Could not recompute progress after logging a call:", e)
+      );
 
       if (routingTaskId && IS_DEFINITIVE_RESULT.includes(callLog[`${b}_result`]) && callLog[`${b}_result`] !== 'DOCUMENTS NOT YET RECEIVED') {
           await supabase.from('call_routing').update({ status: 'COMPLETED' }).eq('id', routingTaskId);

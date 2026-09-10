@@ -9,9 +9,11 @@ import { resolveRoundForNewClient, insertClientRecord } from "../../../utils/cli
 import { classifyInquiries } from "../../../utils/classifyInquiries";
 import { flagGuardedInquiries } from "../../../utils/aiReviewQueue";
 import { useToast } from "../../shared/ui/ToastNotifier";
+import { useConfirm } from "../../shared/ui/ConfirmDialog";
 
 export default function SmartIdiQModal({ show, onClose }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const { adminName, userId } = useAuth();
   const [smartCreds, setSmartCreds] = useState({ email: "", password: "" });
   const [idiqCreds, setIdiqCreds] = useState({ email: "", password: "" });
@@ -50,7 +52,7 @@ export default function SmartIdiQModal({ show, onClose }) {
 
     // Warn-and-confirm on a returning email instead of silently creating a
     // duplicate — see utils/clientDuplicateRound.js.
-    const disputeRound = await resolveRoundForNewClient(clientEmail);
+    const disputeRound = await resolveRoundForNewClient(clientEmail, confirm);
     if (disputeRound === null) return null;
 
     const { data, error } = await insertClientRecord({

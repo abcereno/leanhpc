@@ -11,9 +11,11 @@ import {
   isNonDisputableClassification,
   computeBureauProgress,
 } from "../utils/inquiryCounts";
+import { computeWeightedProgress } from "../utils/progressWeighting";
 import { syncCountReviewRequests, buildApprovedCountsForApprover } from "../utils/countReviewSync";
 import { formatDurationBetween } from "../utils/formatDuration";
 import { useToast } from "../components/shared/ui/ToastNotifier";
+import { useConfirm } from "../components/shared/ui/ConfirmDialog";
 
 const BUCKET = "clients"; 
 const APP_SCRIPT_URL = import.meta.env.VITE_APP_SCRIPT_URL;
@@ -55,6 +57,7 @@ export default function useInquiriesThread({
   const userId = propUserId || user?.id;
   const logAction = useLogger();
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
 
   const [inquiries, setInquiries] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -230,7 +233,7 @@ export default function useInquiriesThread({
 
         // --- RESET LOGIC ---
         if (activeInquiries.length === 0 && accounts.length === 0) {
-            const confirmClear = window.confirm("You have removed all items. This will clear the client's progress. Continue?");
+            const confirmClear = await confirm("You have removed all items. This will clear the client's progress. Continue?");
             if (!confirmClear) { setSaving(false); return false; }
             
             const emptyThread = { accounts: [], experian: [], transunion: [], equifax: [] };
@@ -253,6 +256,14 @@ export default function useInquiriesThread({
                 await supabase.from("clients").update({ counted_at: null }).eq("id", id);
             } catch (countedAtErr) {
                 console.warn("Could not clear counted_at on reset:", countedAtErr);
+            }
+            // Same best-effort reasoning — outcome_ratio (utils/progressWeighting.js)
+            // should reset to 0 alongside progress, but a not-yet-run
+            // sql/add_outcome_ratio.sql should never block a legitimate reset.
+            try {
+                await supabase.from("clients").update({ outcome_ratio: 0 }).eq("id", id);
+            } catch (outcomeErr) {
+                console.warn("Could not clear outcome_ratio on reset:", outcomeErr);
             }
 
             await logAction({
@@ -308,10 +319,21 @@ export default function useInquiriesThread({
         const prevIsFullyCompleted = prevProgress.isFullyCompleted;
 
         const newProgress = computeBureauProgress(grouped);
-        const { isFullyCompleted, progress: progressDecimal, deletedCount, disputableCount } = newProgress;
+        const { isFullyCompleted, progress: outcomeRatio, deletedCount, disputableCount } = newProgress;
         const expStatus = newProgress.expStatus;
         const tuStatus = newProgress.tuStatus;
         const eqStatus = newProgress.eqStatus;
+
+        // clients.progress is now a BLEND (see utils/progressWeighting.js):
+        // 70% this outcome ratio (deleted/disputable, same number `progress`
+        // used to BE in full) + 10% FTC filed + 10% CFPB filed + 10% bureau
+        // calls credit — pulled from document_routing/call_logs here so a
+        // classification save always reflects the client's current docs/
+        // calls state, not just what changed in this save. The raw outcome
+        // ratio itself is saved verbatim into outcome_ratio so the other 2
+        // trigger points (DocumentRouting.jsx, LogCallModal.jsx) can
+        // recompute this same blend later without re-classifying the thread.
+        const progressDecimal = await computeWeightedProgress(id, outcomeRatio);
 
         const timeTakenLabel = formatDurationBetween(startTimeRef.current);
 
@@ -422,6 +444,12 @@ export default function useInquiriesThread({
         // (counter, start_inquiries, progress, completion state), and a
         // schema issue with one extra optional column should never be able
         // to silently take the whole save down with it again.
+        // outcome_ratio is deliberately NOT in this payload — same reasoning
+        // as counted_at below: sql/add_outcome_ratio.sql might not be run
+        // yet on this database, and a schema issue with that one optional
+        // column should never be able to take down the real save (progress/
+        // completion/counter/start_inquiries) with it. Written separately,
+        // best-effort, right after this update succeeds.
         const dbPayload = {
             progress: progressDecimal,
             exp_completed: newProgress.exp_completed, tu_completed: newProgress.tu_completed, eq_completed: newProgress.eq_completed,
@@ -449,6 +477,15 @@ export default function useInquiriesThread({
         // Throwing here surfaces that failure through the catch block below.
         const { error: updateError } = await supabase.from("clients").update(dbPayload).eq("id", id);
         if (updateError) throw new Error("Failed to save classification changes: " + updateError.message);
+
+        // Isolated, best-effort — see the comment above dbPayload for why
+        // outcome_ratio is written separately instead of inside it.
+        try {
+            const { error: outcomeErr } = await supabase.from("clients").update({ outcome_ratio: outcomeRatio }).eq("id", id);
+            if (outcomeErr) console.warn("Could not save outcome_ratio (run sql/add_outcome_ratio.sql if it doesn't exist yet):", outcomeErr.message);
+        } catch (outcomeErr) {
+            console.warn("Could not save outcome_ratio:", outcomeErr);
+        }
 
         // --- PRIORITY 2: SUPERVISOR COUNT REVIEW (automatic) ---
         // Every save by a non-approver that leaves any bureau with
@@ -566,7 +603,7 @@ export default function useInquiriesThread({
     } finally {
         setSaving(false);
     }
-  }, [accounts, inquiries, id, userId, propAdminName, propClientName, updateCounts_, logAction, hasPermission, addToast, syncCountReviewRequests, fetchApprovedCounts]);
+  }, [accounts, inquiries, id, userId, propAdminName, propClientName, updateCounts_, logAction, hasPermission, addToast, syncCountReviewRequests, fetchApprovedCounts, confirm]);
 
   const generateDisputeLetters = useCallback(async (round = 1, isFastResolution = false) => {
     if (!APP_SCRIPT_URL || !id) {
@@ -675,7 +712,7 @@ export default function useInquiriesThread({
   }, [id, inquiries, letterAssets, fetchInquiriesThread, userId, propClientName, logAction, addToast]);
 
   const sendToWebhookAndDeleteClient = useCallback(async () => {
-      if(!window.confirm("Delete permanently?")) return;
+      if(!(await confirm("Delete permanently?"))) return;
       
       let deleteTargetName = propClientName;
       if (!deleteTargetName) {
@@ -694,7 +731,7 @@ export default function useInquiriesThread({
       });
 
       addToast({ title: "Client Deleted", message: `${deleteTargetName} was permanently deleted.`, variant: "success", icon: "bi-trash3-fill" });
-  }, [id, propClientName, logAction, addToast]);
+  }, [id, propClientName, logAction, addToast, confirm]);
 
   const markAllNonLinkedAsDeleted = useCallback(async (targetBureau = "All") => {
     const updatedInquiries = inquiries.map((item) => {
@@ -784,9 +821,9 @@ export default function useInquiriesThread({
 
   const handleClassificationChange = useCallback((index, newClassification) => { setInquiries((prev) => { const u = [...prev]; u[index].classification = newClassification; return u; }); }, []);
   const handleAddInquiry = useCallback(() => { setInquiries((prev) => [...prev, { creditor: "New", bureau: "Experian", date: new Date().toLocaleDateString(), classification: "non-linked" }]); }, []);
-  const handleDeleteInquiry = useCallback((index) => { if (window.confirm("Delete?")) setInquiries((prev) => prev.filter((_, i) => i !== index)); }, []);
+  const handleDeleteInquiry = useCallback(async (index) => { if (await confirm("Delete?")) setInquiries((prev) => prev.filter((_, i) => i !== index)); }, [confirm]);
   const handleAddAccount = useCallback(() => { setAccounts((prev) => [...prev, { creditor: "New", type: "revolving", dateOpened: new Date().toLocaleDateString(), openClosed: "Open" }]); }, []);
-  const handleDeleteAccount = useCallback((index) => { if (window.confirm("Delete?")) setAccounts((prev) => prev.filter((_, i) => i !== index)); }, []);
+  const handleDeleteAccount = useCallback(async (index) => { if (await confirm("Delete?")) setAccounts((prev) => prev.filter((_, i) => i !== index)); }, [confirm]);
 
   return { inquiries, setInquiries, accounts, setAccounts, counts, loading, saving, error, activeTab, setActiveTab, accountTab, setAccountTab, isGenerating, deletedCount, nonLinkedCount, deletedRatioPct, fetchInquiriesThread, saveUpdatedThread, generateDisputeLetters, sendToWebhookAndDeleteClient, filterInquiries, filterAccounts, getTabCount, getAccountTabCount, handleClassificationChange, handleAddInquiry, handleDeleteInquiry, handleAddAccount, handleDeleteAccount, markAllNonLinkedAsDeleted, markAllNonLinkedAsDND, approvedCounts };
 }

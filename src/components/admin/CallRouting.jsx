@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Container, Card, Table, Form, Badge, Button, Spinner, Alert, Modal, Nav } from "react-bootstrap";
 import { supabase } from "../../supabaseClient";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import { resolveServiceId, SERVICES } from "../../utils/services";
 import LogCallModal from "./client-profile/modals/LogCallModal";
 
@@ -25,6 +26,7 @@ const STATUS_OPTIONS = [
 
 export default function CallRouting() {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [rows, setRows] = useState([]);
   const [profiles, setProfiles] = useState([]); 
   const [clientsList, setClientsList] = useState([]); 
@@ -358,7 +360,7 @@ const handleAddCall = async () => {
   // bureau status/completed flags, since those are presumably already
   // correct (that's the whole reason this row looks "done" already).
   const handleForceComplete = async (row) => {
-      const confirmClose = window.confirm(
+      const confirmClose = await confirm(
           `Remove ${row.name} from the Call Routing queue?\n\nUse this when the bureau status shown above is already resolved (e.g. COMPLETED/DELETED) and there's nothing left to actually call about. This won't change any bureau status — it only clears this queue entry.`
       );
       if (!confirmClose) return;

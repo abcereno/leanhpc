@@ -8,6 +8,7 @@ import { Spinner } from "react-bootstrap";
 
 // Components & Listeners
 import ToastProvider from "./components/shared/ui/ToastNotifier";
+import ConfirmProvider from "./components/shared/ui/ConfirmDialog";
 import AdminServiceOrders from "./components/admin/AdminServiceOrders";
 import CountReviewQueue from "./components/admin/CountReviewQueue";
 import AiReviewQueue from "./components/admin/AiReviewQueue";
@@ -130,6 +131,7 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <ToastProvider>
+           <ConfirmProvider>
             <CompanyAuthProvider>
               <AffiliateAuthProvider>
 
@@ -148,6 +150,7 @@ export default function App() {
 
               </AffiliateAuthProvider>
             </CompanyAuthProvider>
+           </ConfirmProvider>
           </ToastProvider>
         </AuthProvider>
       </ThemeProvider>

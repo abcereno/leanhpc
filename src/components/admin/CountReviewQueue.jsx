@@ -5,6 +5,7 @@ import { useAuth } from "../../context/AuthContext";
 import useCountReviews from "../../hooks/useCountReviews";
 import { isLargeCountDifference } from "../../utils/inquiryCounts";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 
 const BUREAUS = ["Experian", "TransUnion", "Equifax"];
 
@@ -52,6 +53,7 @@ export default function CountReviewQueue() {
   const canApprove = hasPermission("approve_count_reviews");
   const { requests, loading, error, approveRequest, denyRequest } = useCountReviews();
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
 
   const [statusFilter, setStatusFilter] = useState("pending");
   const [reviewingClientId, setReviewingClientId] = useState(null);
@@ -143,7 +145,7 @@ export default function CountReviewQueue() {
   const isLargeDiff = largeDiffBureaus.length > 0;
 
   const handleDenyInModal = async (row) => {
-    if (!window.confirm(`Deny the ${row.bureau} count review for ${reviewingClientName}?`)) return;
+    if (!(await confirm(`Deny the ${row.bureau} count review for ${reviewingClientName}?`))) return;
     const res = await denyRequest(row);
     if (!res.success) {
       addToast({ title: "Failed to Deny", message: res.error || "Unknown error.", variant: "danger", icon: "bi-exclamation-triangle-fill" });

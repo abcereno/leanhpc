@@ -1,6 +1,7 @@
 import useClientNotes from "../../../hooks/useClientNotes";
 import NoteComposer from "./NoteComposer";
 import { useToast } from "../../shared/ui/ToastNotifier";
+import { gapKeyLabel } from "../../../utils/timelineGapNotes";
 
 const NOTE_TYPES = [
   { key: "internal", label: "Internal", badge: "dark" },
@@ -71,7 +72,14 @@ export default function ManagerNotesPanel({ clientId }) {
                   <div key={n.id} className={`border rounded p-2 ${n.is_pinned ? "border-warning bg-warning bg-opacity-10" : ""}`}>
                     <div className="d-flex justify-content-between align-items-start mb-1">
                       <div className="small">
-                        <span className={`badge bg-${typeMeta?.badge || "secondary"} me-2`}>{typeMeta?.label || n.note_type}</span>
+                        {n.gap_key ? (
+                          <span className="badge bg-warning text-dark me-2" title="Reason for a gap on the Operational Timeline">
+                            <i className="bi bi-hourglass-split me-1"></i>
+                            Timeline Gap · {gapKeyLabel(n.gap_key)}
+                          </span>
+                        ) : (
+                          <span className={`badge bg-${typeMeta?.badge || "secondary"} me-2`}>{typeMeta?.label || n.note_type}</span>
+                        )}
                         <strong>{n.author_name || "Unknown"}</strong>{" "}
                         <span className="text-muted">
                           ({new Date(n.created_at).toLocaleString()})

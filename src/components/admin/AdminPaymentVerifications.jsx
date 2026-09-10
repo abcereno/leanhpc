@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from "../../supabaseClient";
 import { Card, Table, Badge, Button, Spinner, Alert, Modal } from 'react-bootstrap';
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import { markClientPaid } from "../../utils/markClientPaid";
 
 export default function AdminPaymentVerifications() {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [verifications, setVerifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
@@ -64,7 +66,7 @@ export default function AdminPaymentVerifications() {
 
   // --- APPROVE PAYMENT ---
   const handleApprove = async (record) => {
-    if (!window.confirm(`Approve $${record.amount_due} payment for ${record.clients?.full_name}?`)) return;
+    if (!(await confirm(`Approve $${record.amount_due} payment for ${record.clients?.full_name}?`))) return;
     
     setProcessingId(record.id);
     setMessage("");
@@ -96,7 +98,7 @@ export default function AdminPaymentVerifications() {
             .select('*')
             .eq('id', record.client_id)
             .maybeSingle();
-          const { error: paidErr } = await markClientPaid(record.client_id, freshClient || {}, { triggerSource: "payment_verification_approval" });
+          const { error: paidErr } = await markClientPaid(record.client_id, freshClient || {}, { triggerSource: "payment_verification_approval", amount: record.amount_due });
           if (paidErr) throw paidErr;
 
       } else if (record.service_type === 'vault') {
@@ -126,7 +128,7 @@ export default function AdminPaymentVerifications() {
 
   // --- REJECT PAYMENT ---
   const handleReject = async (record) => {
-    if (!window.confirm("Are you sure you want to REJECT this payment? The client will not get access.")) return;
+    if (!(await confirm({ message: "Are you sure you want to REJECT this payment? The client will not get access.", variant: "danger", confirmText: "Reject Payment" }))) return;
     
     setProcessingId(record.id);
     try {

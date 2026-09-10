@@ -21,21 +21,28 @@ import { supabase } from "../../supabaseClient";
 import { SERVICES } from "../../utils/services";
 import { markClientPaid } from "../../utils/markClientPaid";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import CoverLetterAssets from "../admin/client-profile/CoverLetterAssets";
 
 export default function MoveForwardModal({ show, handleClose, client, onDone }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [serviceId, setServiceId] = useState(client?.service_id || "");
   const [dob, setDob] = useState(client?.dob || "");
   const [ssn, setSsn] = useState("");
   const [address, setAddress] = useState(client?.address || "");
+  const [amount, setAmount] = useState("");
   const [assets, setAssets] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
   if (!client) return null;
 
+  const numericAmount = Number(amount);
+  const amountValid = amount !== "" && Number.isFinite(numericAmount) && numericAmount > 0;
+
   const checklist = [
     { label: "Service", done: !!serviceId },
+    { label: "Amount Paid", done: amountValid },
     { label: "Address", done: !!address.trim() },
     { label: "Date of Birth", done: !!dob },
     { label: "SSN", done: !!ssn.trim() || !!client.ssn },
@@ -62,7 +69,7 @@ export default function MoveForwardModal({ show, handleClose, client, onDone }) 
       });
       return;
     }
-    if (!window.confirm(`Move ${client.full_name} forward? This marks them paid and starts their case.`)) return;
+    if (!(await confirm(`Move ${client.full_name} forward? This marks them paid and starts their case.`))) return;
 
     setSubmitting(true);
     try {
@@ -78,7 +85,7 @@ export default function MoveForwardModal({ show, handleClose, client, onDone }) 
       }).eq("id", client.id);
       if (updateErr) throw updateErr;
 
-      const { error: paidErr } = await markClientPaid(client.id, { ...client, dispute_method: service.disputeMethod });
+      const { error: paidErr } = await markClientPaid(client.id, { ...client, dispute_method: service.disputeMethod }, { amount: numericAmount });
       if (paidErr) throw paidErr;
 
       addToast({ title: "Moved Forward", message: `${client.full_name} is now paid and in the ${service.label} queue.`, variant: "success", icon: "bi-check-circle" });
@@ -122,15 +129,28 @@ export default function MoveForwardModal({ show, handleClose, client, onDone }) 
             </Form.Select>
           </Col>
           <Col md={6}>
-            <Form.Label className="fw-semibold">Date of Birth *</Form.Label>
-            <Form.Control type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
+            <Form.Label className="fw-semibold">Amount Paid *</Form.Label>
+            <Form.Control
+              type="number"
+              step="0.01"
+              min="0.01"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
           </Col>
         </Row>
         <Row className="mb-3 g-2">
           <Col md={6}>
+            <Form.Label className="fw-semibold">Date of Birth *</Form.Label>
+            <Form.Control type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
+          </Col>
+          <Col md={6}>
             <Form.Label className="fw-semibold">SSN *</Form.Label>
             <Form.Control placeholder={client.ssn ? "On file — enter to replace" : "XXX-XX-XXXX"} value={ssn} onChange={(e) => setSsn(e.target.value)} />
           </Col>
+        </Row>
+        <Row className="mb-3 g-2">
           <Col md={6}>
             <Form.Label className="fw-semibold">Address *</Form.Label>
             <Form.Control value={address} onChange={(e) => setAddress(e.target.value)} />

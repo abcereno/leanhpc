@@ -1,11 +1,13 @@
 import React, { useState } from "react";
 import { Form, Button, Alert, Spinner } from "react-bootstrap";
 import { useCompanyAuth } from "../../context/CompanyAuthContext";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import { resolveRoundForNewClient, insertClientRecord } from "../../utils/clientDuplicateRound";
 
 export default function BrokerAddClientForm({ companyId, onSuccess }) {
   // [UPDATE] Destructure isCompanyAdmin to allow them to be agents too
   const { user, isAgent, isCompanyAdmin, fullName } = useCompanyAuth();
+  const { confirm } = useConfirm();
   
   const [formData, setFormData] = useState({
     full_name: "",
@@ -42,7 +44,7 @@ export default function BrokerAddClientForm({ companyId, onSuccess }) {
     try {
         // Warn-and-confirm on a returning email instead of silently creating
         // a duplicate — see utils/clientDuplicateRound.js.
-        const disputeRound = await resolveRoundForNewClient(formData.email);
+        const disputeRound = await resolveRoundForNewClient(formData.email, confirm);
         if (disputeRound === null) {
             setMessage({ type: "warning", text: "Canceled — this email already belongs to an existing client." });
             setLoading(false);

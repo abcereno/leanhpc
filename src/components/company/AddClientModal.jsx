@@ -9,12 +9,14 @@ import { resolveRoundForNewClient, insertClientRecord } from "../../utils/client
 import { SERVICES } from "../../utils/services";
 import { runReportAutoImport } from "../../utils/reportAutoImport";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import useDropzone from "../../hooks/useDropzone";
 
 const fileKey = (f) => `${f.name}-${f.size}-${f.lastModified}`;
 
 export default function AddClientModal({ show, handleClose, onClientAdded }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const { companyId, user, fullName, isAgent, agentCode } = useCompanyAuth(); 
   const logAction = useLogger(); 
   const navigate = useNavigate(); 
@@ -155,7 +157,7 @@ const prevShowRef = useRef(false);
 
     // Warn-and-confirm on a returning email instead of silently creating a
     // duplicate — see utils/clientDuplicateRound.js.
-    const disputeRound = await resolveRoundForNewClient(form.email);
+    const disputeRound = await resolveRoundForNewClient(form.email, confirm);
     if (disputeRound === null) {
       setUploading(false);
       return setMessage("Canceled — this email already belongs to an existing client.");

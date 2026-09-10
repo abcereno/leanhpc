@@ -49,8 +49,15 @@ export async function findClientRoundsByEmail(email) {
  * email), or `null` if the admin canceled — callers must abort the
  * submission when they get `null` back, not fall through to inserting
  * with a default round.
+ *
+ * `confirmFn` is the `confirm` function from useConfirm()
+ * (components/shared/ui/ConfirmDialog.jsx) — this file is a plain utility,
+ * not a hook/component, so it can't call useConfirm() itself; every
+ * add-client form that calls this passes its own `confirm` through.
+ * Defaults to window.confirm so this still degrades safely if a caller
+ * forgets to pass one, rather than throwing.
  */
-export async function resolveRoundForNewClient(email) {
+export async function resolveRoundForNewClient(email, confirmFn = window.confirm) {
   const existing = await findClientRoundsByEmail(email);
   if (existing.length === 0) return 1;
 
@@ -58,11 +65,15 @@ export async function resolveRoundForNewClient(email) {
   const currentRound = latest.dispute_round || 1;
   const nextRound = currentRound + 1;
 
-  const proceed = window.confirm(
+  const message =
     `This email is already used by ${latest.full_name || "an existing client"} ` +
     `(currently Round ${currentRound}).\n\n` +
-    `Click OK to create Round ${nextRound} for this client, or Cancel to stop and look them up instead.`
-  );
+    `Click OK to create Round ${nextRound} for this client, or Cancel to stop and look them up instead.`;
+
+  // confirmFn is either window.confirm (sync, returns boolean) or the
+  // ConfirmDialog confirm() (async, resolves to a boolean) — awaiting a
+  // plain boolean is a no-op, so this line works for both.
+  const proceed = await confirmFn(message);
 
   return proceed ? nextRound : null;
 }

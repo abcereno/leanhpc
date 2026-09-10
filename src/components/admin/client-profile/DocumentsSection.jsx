@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../../../supabaseClient";
 import { useAuth } from "../../../context/AuthContext";
 import useLogger from "../../../hooks/useLogger"; // 1. Import Logger
+import { useConfirm } from "../../shared/ui/ConfirmDialog";
 
 // Primary bucket for NEW uploads
 const PRIMARY_BUCKET = "cover-letter-assets";
@@ -54,9 +55,10 @@ export default function DocumentsSection({ clientId, readonly = false, refreshKe
   const fileInputRef = useRef(null);
   const { hasPermission } = useAuth();
   const canDeleteDocuments = hasPermission("reject_documents");
-  
+
   // 2. Initialize Logger
   const logAction = useLogger();
+  const { confirm } = useConfirm();
 
   const groupedDocuments = useMemo(() => groupDocumentsByDay(documents), [documents]);
 
@@ -245,7 +247,7 @@ export default function DocumentsSection({ clientId, readonly = false, refreshKe
 
   const handleDeleteFile = async (doc) => {
     if (!doc) return;
-    if (!window.confirm(`Delete "${doc.file_name}"?`)) return;
+    if (!(await confirm(`Delete "${doc.file_name}"?`))) return;
 
     try {
       setUploading(true);
@@ -283,7 +285,7 @@ export default function DocumentsSection({ clientId, readonly = false, refreshKe
   };
 
   const handleDeleteAllFiles = async () => {
-    if (!window.confirm("Are you sure you want to delete all documents?")) return;
+    if (!(await confirm("Are you sure you want to delete all documents?"))) return;
 
     try {
       setMessage("");

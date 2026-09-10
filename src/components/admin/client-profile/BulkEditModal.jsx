@@ -3,10 +3,12 @@ import { Modal, Button, Form, Alert, Spinner } from "react-bootstrap";
 import { supabase } from "../../../supabaseClient";
 import useLogger from "../../../hooks/useLogger"; // 1. Import Logger
 import { useToast } from "../../shared/ui/ToastNotifier";
+import { useConfirm } from "../../shared/ui/ConfirmDialog";
 import { SERVICES, deriveServiceId } from "../../../utils/services";
 
 export default function BulkEditModal({ show, onClose, selectedIds, onSaved }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [companies, setCompanies] = useState([]);
@@ -78,7 +80,7 @@ export default function BulkEditModal({ show, onClose, selectedIds, onSaved }) {
       return;
     }
 
-    if (!window.confirm(`Update ${selectedIds.length} clients?`)) return;
+    if (!(await confirm(`Update ${selectedIds.length} clients?`))) return;
 
     setLoading(true);
     try {

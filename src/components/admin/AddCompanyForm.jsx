@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 import {
   Form,
   Button,
@@ -28,6 +29,7 @@ const PLAN_TIERS = {
 
 export default function AddCompanyForm({ onCompanyAdded }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [activeTab, setActiveTab] = useState('new');
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -146,7 +148,7 @@ export default function AddCompanyForm({ onCompanyAdded }) {
 
   const handleRejectReceipt = async () => {
     if (!selectedReceipt) return;
-    if (!window.confirm("Reject this receipt? The company's subscription will stay inactive.")) return;
+    if (!(await confirm("Reject this receipt? The company's subscription will stay inactive."))) return;
 
     setReceiptLoading(true);
     try {

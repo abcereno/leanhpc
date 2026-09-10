@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Container, Card, Table, Button, Badge, Tabs, Tab, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../../supabaseClient';
+import { useConfirm } from '../shared/ui/ConfirmDialog';
 
 // Define your webhook URL here
 const WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/99d2a895-5978-474b-8667-464e4a0c780b"; 
 
 export default function PendingApprovals() {
+  const { confirm } = useConfirm();
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(null);
   const [clients, setClients] = useState([]);
@@ -37,7 +39,7 @@ export default function PendingApprovals() {
   }, []);
 
   const handleAction = async (table, item, action) => {
-    if (!window.confirm(`Are you sure you want to ${action} this user?`)) return;
+    if (!(await confirm(`Are you sure you want to ${action} this user?`))) return;
     
     setApproving(item.id);
     setMessage(null);

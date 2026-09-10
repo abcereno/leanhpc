@@ -16,6 +16,7 @@ import CreditAuditReport from "../../shared/client-pages/CreditAuditReport";
 import ConsumerInvoices from "../modals/ConsumerInvoices";
 import FunderEligibilityModal from "../../shared/ui/FunderEligibilityModal";
 import { useToast } from "../../shared/ui/ToastNotifier";
+import { useConfirm } from "../../shared/ui/ConfirmDialog";
 
 // 👇 NEW: Import the Quick Eligibility Checker 👇
 // (Adjust this path to wherever you saved the file)
@@ -56,6 +57,7 @@ const displayScore = (val) => {
 export default function ProfileDashboard({ client, clientId, auditReport, user, refetchClient, onCreditRefresh, isPreviewMode }) {
   const navigate = useNavigate();
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
 
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -140,7 +142,7 @@ export default function ProfileDashboard({ client, clientId, auditReport, user, 
   }, [clientId, activeTab]); 
   
   const handleAssignToAdmin = async () => {
-    if(!window.confirm("Are you sure you want to request help from an admin regarding this file?")) return;
+    if(!(await confirm("Are you sure you want to request help from an admin regarding this file?"))) return;
     setRequestingHelp(true);
     try {
         const { error } = await supabase.from('notifications').insert({

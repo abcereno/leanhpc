@@ -1,0 +1,26 @@
+-- sql/add_pause_reason.sql
+--
+-- Adds a reason field alongside the existing is_paused / paused_at /
+-- paused_days_total columns on clients (ClientHeader.jsx's Pause/Resume
+-- Service action, src/hooks/useClientActions.js#togglePause).
+--
+-- Unlike the Operational Timeline gap reasons (sql/add_client_timeline_gap_notes.sql,
+-- gated admin-only via ClientSummaryModal.jsx's showGapReasons prop),
+-- pause_reason is meant to be visible to the client's own company/broker
+-- portal — it answers "why did my client's progress stop" without them
+-- needing to contact support. That's exactly why this is a plain column on
+-- clients rather than a client_notes row: every company/broker portal
+-- client-list page that already reads is_paused for its own clients (the
+-- row-coloring in InquiryRemovalClientList.jsx etc.) already has read
+-- access to the rest of that same row under existing RLS, so this piggybacks
+-- on that instead of needing a new policy.
+--
+-- Set (required, via the new Confirm-with-reason modal — see
+-- ConfirmDialog.jsx) when pausing; left in place on resume rather than
+-- cleared, so "why was this paused last time" stays visible as context
+-- even after the client is active again — same reasoning as the gap notes
+-- being a lightweight history rather than something that gets wiped.
+--
+-- Safe to run once; idempotent (IF NOT EXISTS guard).
+
+alter table public.clients add column if not exists pause_reason text;

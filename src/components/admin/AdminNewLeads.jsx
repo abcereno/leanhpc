@@ -21,9 +21,11 @@ import { supabase } from "../../supabaseClient";
 import { SERVICES, resolveServiceId } from "../../utils/services";
 import { markClientPaid } from "../../utils/markClientPaid";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 
 export default function AdminNewLeads() {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -31,6 +33,9 @@ export default function AdminNewLeads() {
   const [companyFilter, setCompanyFilter] = useState("all");
   const [savingId, setSavingId] = useState(null);
   const [pendingServiceById, setPendingServiceById] = useState({});
+  // Amount paid, required before "Mark Paid" is enabled — see
+  // markClientPaid.js's amount param, which auto-records this as income.
+  const [pendingAmountById, setPendingAmountById] = useState({});
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -103,13 +108,27 @@ export default function AdminNewLeads() {
     setPendingServiceById((prev) => ({ ...prev, [clientId]: serviceId }));
   };
 
+  const amountValueFor = (clientId) => pendingAmountById[clientId] ?? "";
+  const handleAmountChange = (clientId, value) => {
+    setPendingAmountById((prev) => ({ ...prev, [clientId]: value }));
+  };
+  const isAmountValid = (clientId) => {
+    const n = Number(amountValueFor(clientId));
+    return amountValueFor(clientId) !== "" && Number.isFinite(n) && n > 0;
+  };
+
   const handleMarkPaid = async (client) => {
     const serviceId = serviceValueFor(client);
     if (!serviceId) {
       addToast({ title: "Service Required", message: "Choose a service before marking this client paid — otherwise it won't show up in any Client Management tab.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
       return;
     }
-    if (!window.confirm(`Mark ${client.full_name} as paid?`)) return;
+    if (!isAmountValid(client.id)) {
+      addToast({ title: "Amount Required", message: "Enter how much this client paid before marking them paid.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
+      return;
+    }
+    const amount = Number(amountValueFor(client.id));
+    if (!(await confirm(`Mark ${client.full_name} as paid ($${amount.toFixed(2)})?`))) return;
 
     setSavingId(client.id);
     try {
@@ -124,7 +143,7 @@ export default function AdminNewLeads() {
         if (svcErr) throw svcErr;
       }
 
-      const { error: paidErr } = await markClientPaid(client.id, { ...client, dispute_method: service.disputeMethod });
+      const { error: paidErr } = await markClientPaid(client.id, { ...client, dispute_method: service.disputeMethod }, { amount });
       if (paidErr) throw paidErr;
 
       addToast({ title: "Marked Paid", message: `${client.full_name} moved to the ${service.label} list.`, variant: "success", icon: "bi-check-circle" });
@@ -170,6 +189,7 @@ export default function AdminNewLeads() {
             <th>Company / Agent</th>
             <th>Credit Report</th>
             <th>Service</th>
+            <th>Amount Paid</th>
             <th>Submitted</th>
             <th>Actions</th>
           </tr>
@@ -195,9 +215,27 @@ export default function AdminNewLeads() {
                     {SERVICES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                   </Form.Select>
                 </td>
+                <td style={{ minWidth: 110 }}>
+                  <Form.Control
+                    size="sm"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    placeholder="0.00"
+                    value={amountValueFor(client.id)}
+                    onChange={(e) => handleAmountChange(client.id, e.target.value)}
+                  />
+                </td>
                 <td className="small text-muted">{new Date(client.created_at).toLocaleDateString()}</td>
                 <td>
-                  <Button size="sm" variant="success" className="fw-bold" disabled={savingId === client.id} onClick={() => handleMarkPaid(client)}>
+                  <Button
+                    size="sm"
+                    variant="success"
+                    className="fw-bold"
+                    disabled={savingId === client.id || !isAmountValid(client.id) || !serviceValueFor(client)}
+                    title={!isAmountValid(client.id) ? "Enter the amount paid first" : undefined}
+                    onClick={() => handleMarkPaid(client)}
+                  >
                     {savingId === client.id ? <Spinner size="sm" /> : "Mark Paid"}
                   </Button>
                 </td>

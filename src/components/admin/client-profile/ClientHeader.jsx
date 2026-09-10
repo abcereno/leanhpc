@@ -27,6 +27,7 @@ import ParseReportModal from "./modals/ParseRreportModal";
 import SSNManagerModal from "./modals/SSNManagerModal";
 import InvoiceGeneratorModal from "./modals/InvoiceGeneratorModal";
 import ManagerOverrideModal from "./modals/ManagerOverrideModal";
+import MarkPaidAmountModal from "./modals/MarkPaidAmountModal";
 import RegenerateHistoryBtn from "../RegenerateHistoryBtn";
 
 const COMPLETION_WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/423af280-1504-4014-9f5e-f10b9bbc0985";
@@ -500,6 +501,7 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
     parseIq: <ParseReportModal show onClose={closeModal} onSaved={handleModalSave} clientId={clientId} isUpdateMode={isUpdateMode} onCustomSave={isUpdateMode ? handleUpdateComplete : undefined} />,
     ssnManager: <SSNManagerModal show onClose={closeModal} clientId={clientId} onSaved={handleModalSave} />,
     generateInvoice: <InvoiceGeneratorModal show onClose={closeModal} client={client} />,
+    markPaid: <MarkPaidAmountModal show onClose={closeModal} clientName={client?.full_name} onConfirm={actions.markAsPaid} />,
   };
 
   if (loading) return <div>Loading client details...</div>;
@@ -722,7 +724,7 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                           <div><i className="bi bi-shield-lock me-2 text-warning" /> Status</div>
                         </Dropdown.Toggle>
                         <Dropdown.Menu className="shadow-lg border-secondary py-2">
-                          {!client.is_paid && <Dropdown.Item onClick={actions.markAsPaid} className="text-success fw-bold py-2"><i className="bi bi-currency-dollar me-2" /> Mark as Paid</Dropdown.Item>}
+                          {!client.is_paid && <Dropdown.Item onClick={() => setActiveModal("markPaid")} className="text-success fw-bold py-2"><i className="bi bi-currency-dollar me-2" /> Mark as Paid</Dropdown.Item>}
                           {client.is_paid  && <Dropdown.Item onClick={actions.togglePause} className="text-warning py-2"><i className={`bi bi-${client.is_paused ? "play" : "pause"}-fill me-2`} />{client.is_paused ? "Resume Service" : "Pause Service"}</Dropdown.Item>}
                           <Dropdown.Divider className="border-secondary opacity-25" />
                           <Dropdown.Item onClick={actions.toggleDispute} className={`${client.dont_dispute ? "text-danger" : "text-info"} py-2`}>

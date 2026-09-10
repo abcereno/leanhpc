@@ -1,13 +1,32 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Modal, Button, Row, Col, Card, Badge, Spinner } from "react-bootstrap";
 import { supabase } from "../../../../supabaseClient";
 import { isBlankStartInquiries, computeAiCounts } from "../../../../utils/inquiryCounts";
 import { useToast } from "../../../shared/ui/ToastNotifier";
+import useClientNotes from "../../../../hooks/useClientNotes";
+import { useConfirm } from "../../../shared/ui/ConfirmDialog";
+import { GAP_REASON_PRESETS, gapKeyFor } from "../../../../utils/timelineGapNotes";
+
+// Below this many days between two consecutive completed timeline steps,
+// the gap isn't worth flagging — normal same-day/next-day turnaround
+// shouldn't prompt anyone to explain themselves.
+const MIN_GAP_DAYS_TO_FLAG = 1;
 
 const BUCKET = "clients"; 
 
-export default function ClientSummaryModal({ show, onClose, client, companyName }) {
+// `showGapReasons` (default false) gates the Operational Timeline's gap
+// badges + reason editor — this modal is shared across the admin client
+// list (AdminClientList.jsx) AND every company/broker portal's client list
+// (CompanyPortalDashboard.jsx, ServiceClientList.jsx,
+// InquiryRemovalClientList.jsx, BrokerClientList.jsx), so it defaults OFF
+// and only the admin call site opts in. Internal delay reasons ("Docs not
+// received", "Client unresponsive," etc.) are staff-only context, not
+// something partners should see or be able to add. Defaulting to false
+// (rather than CoverLetterAssets.jsx's showAiResults=true default) means a
+// future new call site that forgets to pass this stays safe by default.
+export default function ClientSummaryModal({ show, onClose, client, companyName, showGapReasons = false }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
 
@@ -20,6 +39,39 @@ export default function ClientSummaryModal({ show, onClose, client, companyName 
   // computeAiCounts() every save path uses, without re-fetching the file.
   const [threadGrouped, setThreadGrouped] = useState(null);
   const [backfilling, setBackfilling] = useState(false);
+
+  // Fetched separately from the main dateData query below (own try/catch,
+  // fails silently to null) because clients.pause_reason
+  // (sql/add_pause_reason.sql) is a brand-new column — until that
+  // migration is run, selecting it would error the whole combined query
+  // above and blank out is_paid/paid_at/etc for every caller of this
+  // modal. Unlike the gap-reason feature, this banner is meant to be
+  // visible in the company/broker portal too, so it can't be gated behind
+  // showGapReasons — it just degrades to "no reason on file" instead.
+  const [pauseReason, setPauseReason] = useState(null);
+
+  // Reasons for gaps on the Operational Timeline below (e.g. "why did 5
+  // days pass between Payment and Documents") — stored as gap_key-tagged
+  // rows in the same client_notes table Manager Notes already uses, see
+  // src/utils/timelineGapNotes.js. Only fetched at all when
+  // showGapReasons is on (admin view) — client_notes' RLS already blocks
+  // company/broker reads (is_admin_staff() only), but there's no reason to
+  // even attempt the query on a surface that will never render the result.
+  const { notes: allNotes, addNote: addManagerNote, migrationMissing: notesMigrationMissing } = useClientNotes(showGapReasons ? client?.id : null);
+  const [editingGapKey, setEditingGapKey] = useState(null);
+  const [gapReasonDraft, setGapReasonDraft] = useState("");
+  const [savingGapKey, setSavingGapKey] = useState(null);
+
+  const gapNotesByKey = useMemo(() => {
+    const map = {};
+    for (const n of allNotes) {
+      if (!n.gap_key) continue;
+      if (!map[n.gap_key] || new Date(n.created_at) > new Date(map[n.gap_key].created_at)) {
+        map[n.gap_key] = n;
+      }
+    }
+    return map;
+  }, [allNotes]);
 
   // Helper to normalize strings (lowercase & remove extra spaces)
   const normClass = (v) => String(v || "").trim().toLowerCase();
@@ -46,11 +98,26 @@ export default function ClientSummaryModal({ show, onClose, client, companyName 
         // 1. Fetch Exact Client Timestamps and Info
         const { data: dateData } = await supabase
             .from('clients')
-            .select('created_at, updated_at, is_paid, is_uploaded, tu_eq_docs_submitted_at, paid_at, completed_at, progress, start_inquiries, approved_exp_count, approved_tu_count, approved_eq_count')
+            .select('created_at, updated_at, is_paid, is_uploaded, tu_eq_docs_submitted_at, paid_at, completed_at, progress, start_inquiries, approved_exp_count, approved_tu_count, approved_eq_count, is_paused, paused_at')
             .eq('id', client.id)
             .single();
 
         if (dateData) setClientDates(dateData);
+
+        // 1b. Fetch pause_reason in isolation — see the pauseReason state
+        // comment above for why this is split out from the query above.
+        try {
+          const { data: pauseData, error: pauseErr } = await supabase
+            .from('clients')
+            .select('pause_reason')
+            .eq('id', client.id)
+            .single();
+          if (pauseErr) throw pauseErr;
+          setPauseReason(pauseData?.pause_reason || null);
+        } catch (pauseFetchErr) {
+          console.warn("pause_reason unavailable (migration likely not run yet):", pauseFetchErr.message);
+          setPauseReason(null);
+        }
 
         // 2. Fetch Inquiry Thread JSON
         const { data: fileData } = supabase.storage
@@ -190,6 +257,39 @@ export default function ClientSummaryModal({ show, onClose, client, companyName 
 
   const timeline = buildTimeline();
 
+  // Pairs each step with the gap to the NEXT step, when both are
+  // completed and more than MIN_GAP_DAYS_TO_FLAG days apart — e.g. Payment
+  // Received Sep 3 -> Documents Received Sep 8 is a 5-day gap worth
+  // flagging; same-day turnaround isn't.
+  const timelineWithGaps = timeline.map((step, idx) => {
+    const next = timeline[idx + 1];
+    if (!showGapReasons || !(step.active && step.date && next?.active && next.date)) {
+      return { ...step, gap: null };
+    }
+    const diffDays = (new Date(next.date) - new Date(step.date)) / (1000 * 60 * 60 * 24);
+    if (diffDays < MIN_GAP_DAYS_TO_FLAG) return { ...step, gap: null };
+
+    const key = gapKeyFor(step.label, next.label);
+    return { ...step, gap: { key, days: Math.round(diffDays), note: gapNotesByKey[key] || null } };
+  });
+
+  const handleSaveGapReason = async (gapKey) => {
+    const reason = gapReasonDraft.trim();
+    if (!reason) return;
+    setSavingGapKey(gapKey);
+    try {
+      const res = await addManagerNote(reason, "internal", false, gapKey);
+      if (!res?.success) {
+        addToast({ title: "Save Failed", message: res?.error || "Could not save the gap reason.", variant: "danger", icon: "bi-exclamation-triangle-fill" });
+        return;
+      }
+      setEditingGapKey(null);
+      setGapReasonDraft("");
+    } finally {
+      setSavingGapKey(null);
+    }
+  };
+
   // --- CYCLE TIME METRIC CALCULATION ---
   const getCycleTimeMetrics = () => {
       const cData = clientDates || client;
@@ -227,10 +327,10 @@ export default function ClientSummaryModal({ show, onClose, client, companyName 
     const currentVal = clientDates?.start_inquiries;
 
     if (currentVal && !isBlankStartInquiries(currentVal)) {
-      const ok = window.confirm(
+      const confirmed = await confirm(
         `Current Start Inquiries is "${currentVal}". Recomputing from the saved report gives "${computed}". Overwrite?`
       );
-      if (!ok) return;
+      if (!confirmed) return;
     }
 
     setBackfilling(true);
@@ -293,7 +393,24 @@ EQ:  ${fmt('Equifax')}
             Client Profile: {client.full_name}
         </Modal.Title>
       </Modal.Header>
-      
+
+      {(clientDates || client)?.is_paused && (
+        <div className="px-4 py-3 d-flex align-items-start gap-2" style={{ backgroundColor: "rgba(245, 158, 11, 0.12)", borderBottom: `1px solid ${theme.border}` }}>
+          <i className="bi bi-pause-circle-fill fs-4 flex-shrink-0" style={{ color: theme.warning }}></i>
+          <div>
+            <div className="fw-bold text-uppercase small" style={{ color: theme.warning, letterSpacing: '0.5px' }}>
+              Service Paused
+              {(clientDates || client)?.paused_at && (
+                <span className="fw-normal text-uppercase ms-2" style={{ color: theme.textMuted, letterSpacing: 'normal' }}>
+                  since {new Date((clientDates || client).paused_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+              )}
+            </div>
+            <div className="small" style={{ color: theme.textMain }}>{pauseReason || "No reason on file."}</div>
+          </div>
+        </div>
+      )}
+
       <Modal.Body className="p-0" style={{ backgroundColor: theme.bgMain }}>
         <Row className="g-0 h-100">
             
@@ -311,12 +428,13 @@ EQ:  ${fmt('Equifax')}
                             {/* Vertical Line */}
                             <div className="position-absolute h-100" style={{ left: '11px', top: '5px', width: '2px', backgroundColor: theme.border }}></div>
                             
-                            {timeline.map((step, idx) => (
-                                <div key={idx} className="position-relative d-flex align-items-start mb-4">
-                                    <div className="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0 z-2 mt-1" 
-                                         style={{ 
-                                             width: '24px', height: '24px', 
-                                             backgroundColor: step.active ? theme.accentBlue : theme.bgCard, 
+                            {timelineWithGaps.map((step, idx) => (
+                                <div key={idx} className="mb-4">
+                                <div className="position-relative d-flex align-items-start">
+                                    <div className="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0 z-2 mt-1"
+                                         style={{
+                                             width: '24px', height: '24px',
+                                             backgroundColor: step.active ? theme.accentBlue : theme.bgCard,
                                              border: `2px solid ${step.active ? theme.accentBlue : theme.border}`,
                                              color: step.active ? '#fff' : 'transparent'
                                          }}>
@@ -336,6 +454,68 @@ EQ:  ${fmt('Equifax')}
                                             )}
                                         </div>
                                     </div>
+                                </div>
+
+                                {/* Gap indicator + reason editor, sitting between this step and the next */}
+                                {step.gap && (
+                                    <div className="position-relative mt-2" style={{ marginLeft: '35px', paddingLeft: '10px', borderLeft: `2px dashed ${theme.warning}` }}>
+                                        <div className="d-flex align-items-center flex-wrap gap-2">
+                                            <Badge bg="warning" text="dark" className="fw-bold" style={{ fontSize: '0.65rem' }}>
+                                                <i className="bi bi-hourglass-split me-1"></i>{step.gap.days}d gap
+                                            </Badge>
+                                            {step.gap.note ? (
+                                                <span className="small" style={{ color: theme.textMain }}>{step.gap.note.text}</span>
+                                            ) : editingGapKey !== step.gap.key ? (
+                                                notesMigrationMissing ? (
+                                                    <span className="small fst-italic" style={{ color: theme.textMuted }}>Run the Manager Notes migration to add a reason</span>
+                                                ) : (
+                                                    <Button variant="link" size="sm" className="p-0" style={{ fontSize: '0.75rem' }} onClick={() => { setEditingGapKey(step.gap.key); setGapReasonDraft(""); }}>
+                                                        + Add reason
+                                                    </Button>
+                                                )
+                                            ) : null}
+                                            {step.gap.note && !notesMigrationMissing && (
+                                                <Button variant="link" size="sm" className="p-0 text-muted" title="Update reason" onClick={() => { setEditingGapKey(step.gap.key); setGapReasonDraft(step.gap.note.text); }}>
+                                                    <i className="bi bi-pencil-fill" style={{ fontSize: '0.7rem' }}></i>
+                                                </Button>
+                                            )}
+                                        </div>
+
+                                        {editingGapKey === step.gap.key && (
+                                            <div className="mt-2 d-flex flex-column gap-2" style={{ maxWidth: '320px' }}>
+                                                <div className="d-flex flex-wrap gap-1">
+                                                    {GAP_REASON_PRESETS.map((preset) => (
+                                                        <Button
+                                                            key={preset}
+                                                            size="sm"
+                                                            variant={gapReasonDraft === preset ? "info" : "outline-secondary"}
+                                                            className="py-0 px-2"
+                                                            style={{ fontSize: '0.7rem' }}
+                                                            onClick={() => setGapReasonDraft(preset)}
+                                                        >
+                                                            {preset}
+                                                        </Button>
+                                                    ))}
+                                                </div>
+                                                <input
+                                                    className="form-control form-control-sm"
+                                                    style={{ backgroundColor: theme.headerBg, color: theme.textMain, borderColor: theme.border }}
+                                                    placeholder="Or type a custom reason..."
+                                                    value={gapReasonDraft}
+                                                    onChange={(e) => setGapReasonDraft(e.target.value)}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' && gapReasonDraft.trim()) handleSaveGapReason(step.gap.key); }}
+                                                    autoFocus
+                                                />
+                                                <div className="d-flex gap-2">
+                                                    <Button size="sm" variant="success" disabled={!gapReasonDraft.trim() || savingGapKey === step.gap.key} onClick={() => handleSaveGapReason(step.gap.key)}>
+                                                        {savingGapKey === step.gap.key ? <Spinner size="sm" /> : "Save"}
+                                                    </Button>
+                                                    <Button size="sm" variant="outline-secondary" onClick={() => { setEditingGapKey(null); setGapReasonDraft(""); }}>Cancel</Button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 </div>
                             ))}
                         </div>

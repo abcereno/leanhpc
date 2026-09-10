@@ -3,6 +3,7 @@ import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { getHolidays, calculateBusinessDays, calculatePaidRunningDays } from "../utils/dateHelpers";
 import { useToast } from "../components/shared/ui/ToastNotifier";
+import { useConfirm } from "../components/shared/ui/ConfirmDialog";
 import { resolveServiceId } from "../utils/services";
 import { allBureausResolved } from "../utils/inquiryCounts";
 import { fetchNextStepSignals, getNextStepTag } from "../utils/nextStepTag";
@@ -14,6 +15,7 @@ const SORT_DEFAULT_DIRECTION = { name: "asc", company: "asc", agent: "asc", prog
 
 export default function useAdminClients() {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
   const { isAuthenticated } = useAuth();
 
   // Core State
@@ -96,14 +98,14 @@ export default function useAdminClients() {
       }
       if (!clientId) return;
       
-      if (!window.confirm("Are you sure you want to delete this client? This cannot be undone.")) {
+      if (!(await confirm("Are you sure you want to delete this client? This cannot be undone."))) {
         return;
       }
 
       try {
         const { error: delErr } = await supabase.from("clients").delete().eq("id", clientId);
         if (delErr) throw delErr;
-        
+
         setAllClients((prev) => prev.filter((c) => c.id !== clientId));
       } catch (e) {
         console.error("[useAdminClients] delete error:", e);
@@ -111,7 +113,7 @@ export default function useAdminClients() {
         addToast({ title: "Delete Failed", message: "Failed to delete client: " + e.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
       }
     },
-    []
+    [confirm]
   );
 
   // Helpers
@@ -299,11 +301,39 @@ export default function useAdminClients() {
     if (!target) return;
 
     const isPausing = !target.is_paused;
-    if (!window.confirm(`Are you sure you want to ${isPausing ? 'pause' : 'resume'} service for ${target.full_name || 'this client'}?`)) return;
+
+    // Pausing requires a reason (clients.pause_reason, sql/add_pause_reason.sql)
+    // — same requirement as ClientHeader.jsx's Status-dropdown pause action
+    // (useClientActions.js#togglePause), which this list-row pause button is
+    // a separate implementation of. It's visible on the client's
+    // company/broker portal summary (ClientSummaryModal.jsx), not gated
+    // admin-only like the Operational Timeline gap notes.
+    let reason = null;
+    if (isPausing) {
+      reason = await confirm({
+        title: "Pause Service",
+        message: `Pause service for ${target.full_name || "this client"}? The reason below will show on their company/partner portal summary until service resumes.`,
+        confirmText: "Pause Service",
+        variant: "warning",
+        requireReason: true,
+        reasonLabel: "Reason for pausing",
+        reasonPlaceholder: "e.g. Waiting on ID/SSN documents from client",
+      });
+      if (!reason) return;
+    } else {
+      const confirmed = await confirm({
+        title: "Resume Service",
+        message: `Resume service for ${target.full_name || "this client"}?`,
+        confirmText: "Resume Service",
+        variant: "success",
+      });
+      if (!confirmed) return;
+    }
 
     const updateData = { is_paused: isPausing };
     if (isPausing) {
       updateData.paused_at = new Date().toISOString();
+      updateData.pause_reason = reason;
     } else {
       const pausedAt = target.paused_at ? new Date(target.paused_at) : null;
       const now = new Date();
@@ -326,13 +356,13 @@ export default function useAdminClients() {
       if (c.id !== clientId) return c;
       const newPausedAt = isPausing ? updateData.paused_at : null;
       const newPausedTotal = isPausing ? (c.paused_days_total || 0) : (updateData.paused_days_total || c.paused_days_total || 0);
-      const updated = { ...c, is_paused: isPausing, paused_at: newPausedAt, paused_days_total: newPausedTotal };
+      const updated = { ...c, is_paused: isPausing, paused_at: newPausedAt, paused_days_total: newPausedTotal, pause_reason: isPausing ? reason : c.pause_reason };
       // Recompute immediately so pausing freezes the visible day count right
       // away instead of only after the next reload.
       return { ...updated, paidRunningDays: calculatePaidRunningDays(updated, holidaySet) };
     }));
 
-  }, [holidaySet]);
+  }, [holidaySet, confirm]);
 
   // Set Paid Days Handler
   const handleSetPaidDays = useCallback(async (clientId) => {

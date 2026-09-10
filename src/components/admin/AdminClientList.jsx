@@ -578,7 +578,11 @@ export default function AdminClientList() {
 
       {showCountInquiries && <SmartIdiQModal show={showCountInquiries} onClose={() => setShowCountInquiries(false)} />}
       <BulkEditModal show={showBulkEdit} onClose={() => setShowBulkEdit(false)} selectedIds={Array.from(selectedIds)} onSaved={() => { setSelectedIds(new Set()); resetFilters(); }} />
-      <ClientSummaryModal show={showSummary} onClose={handleCloseSummary} client={summaryClient} />
+      {/* showGapReasons=true here only — this modal is also rendered from
+          the company/broker portals' client lists, where Operational
+          Timeline gap reasons (internal delay context) shouldn't be
+          visible. See ClientSummaryModal.jsx's showGapReasons doc comment. */}
+      <ClientSummaryModal show={showSummary} onClose={handleCloseSummary} client={summaryClient} showGapReasons />
       <FunderEligibilityModal show={showEligibilityModal} onHide={handleCloseEligibility} client={eligibilityClient} />
 
       <Modal show={showPaidModal} onHide={closePaidModal} centered size="sm">

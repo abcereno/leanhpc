@@ -2,9 +2,11 @@ import React, { useState, useEffect } from "react";
 import { Table, Badge, Spinner, Alert, Card, Button } from "react-bootstrap";
 import { supabase } from "../../supabaseClient";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { useConfirm } from "../shared/ui/ConfirmDialog";
 
 export default function CompanyLeadsList({ companyId }) {
   const { addToast } = useToast();
+  const { confirm } = useConfirm();
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -44,7 +46,7 @@ export default function CompanyLeadsList({ companyId }) {
 
     // 👇 NEW: Core Lead Deletion Handler Logic 👇
     const handleDeleteLead = async (leadId, leadName) => {
-        const confirmed = window.confirm(`Are you absolutely sure you want to permanently delete the lead record for "${leadName}"? This action cannot be undone.`);
+        const confirmed = await confirm(`Are you absolutely sure you want to permanently delete the lead record for "${leadName}"? This action cannot be undone.`);
         if (!confirmed) return;
 
         setDeletingId(leadId);
