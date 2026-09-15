@@ -193,7 +193,7 @@ export default function DocumentRouting() {
           // requested), the backfill query below catches it as a second
           // layer — see its own comment.
           supabase.from('clients').select('id, full_name, is_paid, is_paused, exp_completed, tu_completed, eq_completed, admin_id, dispute_method, service_id').order('full_name', { ascending: true }).range(0, 99999),
-          supabase.from('call_routing').select('client_id').eq('status', 'PENDING').range(0, 99999),
+          supabase.from('call_routing').select('client_id, bureau').eq('status', 'PENDING').range(0, 99999),
           // Same 1000-row cap risk as the clients query above, but worse
           // here — a truncated result wouldn't just mislabel a name, it
           // would drop the routing row (task) entirely from the queue.
@@ -208,6 +208,22 @@ export default function DocumentRouting() {
       const activeCalls = callRes.data || [];
       const activeDocs = docRes.data || [];
       const allDocs = allDocsRes.data || [];
+
+      // Experian is its own INDEPENDENT call track (see sql/self_healing_
+      // workflow_queues.sql's own header comment: "It never waits on
+      // documents at all") — completely separate from the TU/EQ docs-round
+      // cycle this screen sends. Blocking Send here just because the
+      // client has an unrelated, still-open EXP call task meant staff could
+      // resolve/complete the actual TU/EQ call this doc round was waiting
+      // on and STILL find Send disabled, since a PENDING EXP row (bureau
+      // right where the client hasn't been called yet for Experian) has
+      // nothing to do with whether this round's docs are safe to send.
+      // Only a pending TU/EQ call, or a legacy bureau=NULL row (which
+      // predates per-bureau call_routing and is treated as covering all
+      // three — see sql/add_bureau_call_routing.sql), should actually block
+      // sending a new round for this client.
+      const hasBlockingCallQueueEntry = (clientId) =>
+        activeCalls.some((call) => call.client_id === clientId && call.bureau !== 'exp');
 
       // Belt-and-suspenders backfill: the bulk clients fetch above already
       // carries .range(0, 99999) specifically to dodge PostgREST's default
@@ -389,9 +405,11 @@ export default function DocumentRouting() {
       // showing their docs checklist was still open. Per explicit request:
       // every paid, not-fully-done client should show up here regardless
       // of whether they've already been sent to calls — `alreadyInCallQueue`
-      // is kept (not dropped) so the row can still warn about it and the
-      // Send button can guard against double-queuing a second call_routing
-      // row for the same client (see the Send button below).
+      // is kept (not dropped) so the row can still show the "IN CALL
+      // ROUTING" warning badge. It no longer disables Send: per explicit
+      // request, the docs admin can always move a client to the next round
+      // even with an open TU/EQ call task sitting in Call Routing (see the
+      // Send button below) — the badge is informational only now.
       activeDocs.forEach(t => {
           if (existingDocClientIds.has(t.client_id)) return;
 
@@ -399,7 +417,7 @@ export default function DocumentRouting() {
           let alreadyInCallQueue = false;
           if (c) {
              const isFullyDone = c.exp_completed && c.tu_completed && c.eq_completed;
-             alreadyInCallQueue = activeCalls.some(call => call.client_id === c.id);
+             alreadyInCallQueue = hasBlockingCallQueueEntry(c.id);
              if (isFullyDone) return;
           }
 
@@ -426,7 +444,7 @@ export default function DocumentRouting() {
           if (!c.is_paid) return;
 
           const isFullyDone = c.exp_completed && c.tu_completed && c.eq_completed;
-          const alreadyInCallQueue = activeCalls.some(call => call.client_id === c.id);
+          const alreadyInCallQueue = hasBlockingCallQueueEntry(c.id);
 
           if (!isFullyDone && !existingDocClientIds.has(c.id)) {
               existingDocClientIds.add(c.id);
@@ -839,7 +857,7 @@ export default function DocumentRouting() {
                         <span
                           className="ms-2 badge bg-info text-dark"
                           style={{fontSize:'0.65rem'}}
-                          title="This client already has an active Call Routing entry — shown here so they're never missed, but Send is disabled to avoid queuing a duplicate call. Use Call Routing to work this client, or Delete here if this round is no longer needed."
+                          title="This client already has an active TU/EQ Call Routing entry (an open Experian call alone doesn't count — that's its own independent track) — shown here so they're never missed. Send still works if the docs admin needs to move this client to the next round anyway; just be aware a call task for the current round is still open in Call Routing."
                         >
                           <i className="bi bi-headset me-1"></i>IN CALL ROUTING
                         </span>
@@ -960,8 +978,8 @@ export default function DocumentRouting() {
                             size="sm"
                             variant="success"
                             onClick={() => handleSubmit(task)}
-                            disabled={savingId === task.id || task.alreadyInCallQueue}
-                            title={task.alreadyInCallQueue ? "Already sent — this client has an active Call Routing entry. Sending again would queue a duplicate call." : undefined}
+                            disabled={savingId === task.id}
+                            title={task.alreadyInCallQueue ? "This client also has an active TU/EQ Call Routing entry for the current round — Send still works if you need to move them to the next round anyway." : undefined}
                         >
                             {savingId === task.id ? <Spinner size="sm" animation="border" /> : <><i className="bi bi-arrow-right me-1"></i> Send</>}
                         </Button>

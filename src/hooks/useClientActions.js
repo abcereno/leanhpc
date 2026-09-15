@@ -4,6 +4,7 @@ import { useToast } from "../components/shared/ui/ToastNotifier";
 import { useConfirm } from "../components/shared/ui/ConfirmDialog";
 import { markClientPaid } from "../utils/markClientPaid";
 import { computeWeightedProgress } from "../utils/progressWeighting";
+import { insertClientRecord, copyIdentityDocuments } from "../utils/clientDuplicateRound";
 
 export function useClientActions(clientId, client, refetch, onRefresh) {
   const { addToast } = useToast();
@@ -45,6 +46,29 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
     await reload();
     ok("Client marked as paid.");
     return true;
+  };
+
+  // Undo for an accidental "Mark as Paid" click. Deliberately minimal, per
+  // explicit ask — only flips is_paid/paid_at back off, nothing else.
+  // markClientPaid.js's real "mark paid" flow also resets bureau statuses,
+  // creates a Document Routing round, auto-records income, and fires 2
+  // external webhooks — none of that is undone here (the round and any
+  // income row stay on file, no "unpaid" webhook is sent). If a client
+  // needs to be paid again later, re-marking them paid re-runs that full
+  // flow fresh (its own `if (count === 0)` guard means it won't create a
+  // second Document Routing round).
+  const markAsUnpaid = async () => {
+    const confirmed = await confirm({
+      title: "Mark Unpaid",
+      message: `Undo payment for ${client.full_name || "this client"}? This only clears the paid status and paid date for an accidental "Mark as Paid" — it will NOT remove the Document Routing round, any auto-recorded income, or send a follow-up webhook.`,
+      confirmText: "Mark Unpaid",
+      variant: "danger",
+    });
+    if (!confirmed) return;
+    const { error: e } = await supabase.from("clients").update({ is_paid: false, paid_at: null }).eq("id", clientId);
+    if (e) { err(`Failed to mark unpaid: ${e.message}`); return; }
+    await reload();
+    ok("Client marked unpaid.");
   };
 
   // Pausing requires a reason (sql/add_pause_reason.sql's clients.pause_reason)
@@ -195,10 +219,79 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
   const markServiceComplete = () =>
     update({ date_completed: new Date().toISOString(), progress: 1.0 }, "Client marked as complete.");
 
+  // Manually-selected processing stage (utils/processingStage.js) — set from
+  // ClientHeader.jsx's Status dropdown submenu. No confirmation needed
+  // (skipConfirm=true), same reasoning as markBureauComplete/NA: a quick,
+  // easily-reversible pick from a fixed list, not a destructive action.
+  const setProcessingStage = (stageId) =>
+    update({ processing_stage: stageId || null, processing_stage_updated_at: new Date().toISOString() }, null, true);
+
+  // Creates a brand-new `clients` row for a returning client who needs
+  // another round — same reasoning/tooling as the 6 "add client" forms
+  // (see utils/clientDuplicateRound.js's header comment), just triggered
+  // from an existing client's own profile instead of a fresh intake form.
+  // Copies personal/contact info + identity documents (ID/proof of
+  // address/authorization) forward; deliberately does NOT copy anything
+  // derived from the OLD round's credit report or work (thread.json,
+  // inquiry counts, payment/progress/completion status, letters, FTC
+  // report) — the new round starts completely fresh on all of that, same
+  // as any other brand-new client. Returns the new client's id on
+  // success (so the caller can navigate there), or null if canceled/
+  // failed.
+  const startNewRound = async () => {
+    const nextRound = (client.dispute_round || 1) + 1;
+    const confirmed = await confirm({
+      title: "Start New Round",
+      message: `Create Round ${nextRound} for ${client.full_name || "this client"}? This copies their personal info (name, SSN, contact, address) and identity documents (ID, proof of address, authorization) into a brand-new client record. It will NOT carry over the credit report, inquiry counts, payment status, or progress — the new round starts completely fresh, same as a new client.`,
+      confirmText: "Start New Round",
+      variant: "warning",
+    });
+    if (!confirmed) return null;
+
+    const { data, error: e } = await insertClientRecord({
+      full_name: client.full_name,
+      ssn: client.ssn,
+      email: client.email,
+      phone: client.phone,
+      dob: client.dob,
+      address: client.address,
+      dispute_method: client.dispute_method,
+      logins_notes: client.logins_notes,
+      company_id: client.company_id,
+      admin_id: client.admin_id,
+      agent_id: client.agent_id,
+      agent: client.agent,
+      agent_code: client.agent_code,
+      service_id: client.service_id,
+      dispute_round: nextRound,
+    }, { select: "id" });
+
+    if (e || !data) {
+      err(`Failed to start new round: ${e?.message || "unknown error"}`);
+      return null;
+    }
+
+    const { copied, skipped } = await copyIdentityDocuments(clientId, data.id);
+    if (skipped > 0) {
+      addToast({
+        title: "New Round Started",
+        message: `Round ${nextRound} created. ${copied} identity document(s) copied, ${skipped} could not be copied — check them manually on the new round.`,
+        variant: "warning",
+        icon: "bi-exclamation-triangle",
+      });
+    } else {
+      ok(`Round ${nextRound} started${copied ? ` — ${copied} identity document(s) copied.` : "."}`);
+    }
+
+    return data.id;
+  };
+
   return {
-    markAsPaid, togglePause, toggleDispute, toggleInquiriesLock,
+    markAsPaid, markAsUnpaid, togglePause, toggleDispute, toggleInquiriesLock,
     updateStartDateToToday,
     markBureauComplete, markBureauNA,
     markServiceComplete,
+    setProcessingStage,
+    startNewRound,
   };
 }

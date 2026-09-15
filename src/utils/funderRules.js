@@ -37,7 +37,16 @@ export function calculateFundingEligibility(parsedData, userOptions = {}) {
     }).length;
 
     // Hazards (Derogatories & Bankruptcies)
-    const derogs = (parsedData.negatives || []).length;
+    // Only real derogatory tradeline/public-record hits count here — the
+    // negatives array also carries INQUIRY entries (severity 'Low', just
+    // "Unverified Inquiry") and UTILIZATION flags, both of which already
+    // have their own dedicated rules below (RULE 3, RULE 1). Counting the
+    // whole array meant almost any client with a single inquiry in the last
+    // 24 months, or one revolving account over 30% utilization, got forced
+    // to RED and labeled "Major Derogatories Found" with zero actual
+    // collections/late payments/bankruptcies on file.
+    const DEROG_CATEGORIES = new Set(["COLLECTION", "LATE_PAYMENT", "PUBLIC_RECORD"]);
+    const derogs = (parsedData.negatives || []).filter((n) => DEROG_CATEGORIES.has(n.category)).length;
     const bankruptcies = (parsedData.public_records || []).filter(pr => 
       String(pr.type).toLowerCase().includes("bankruptcy")
     ).length;

@@ -28,6 +28,7 @@ import TeamQueue from "./ops/TeamQueue";
 import PartnerDashboard from "./ops/PartnerDashboard";
 import ProductionQueue from "./ops/ProductionQueue";
 import WorkflowPipeline from "./ops/WorkflowPipeline";
+import ProcessingPipeline from "./ops/ProcessingPipeline";
 import QuickActions from "./ops/QuickActions";
 import HealthScoreBadge from "./ops/HealthScoreBadge";
 import DateRangeFilter from "./ops/DateRangeFilter";
@@ -72,7 +73,7 @@ const getStartOfMonthString = () => {
  * teamQueue.js, aging.js — see HPC-Ops-Sprint-Implementation-Plan.md.
  */
 export default function AdminDashboard() {
-  const [topTab, setTopTab] = useState("overview"); // "overview" | "pipeline" | "production_queue" | "team_queue" | "partners" | "call_metrics"
+  const [topTab, setTopTab] = useState("overview"); // "overview" | "pipeline" | "processing_pipeline" | "production_queue" | "team_queue" | "partners" | "call_metrics"
 
   // --- Shared ops data ---
   // `role` here is only used as a display label (badge) further down — the
@@ -378,6 +379,32 @@ export default function AdminDashboard() {
                   </Button>
                 </div>
                 <WorkflowPipeline clients={opsFilters.clients} companies={companies} scopeLabel={scopeLabel} />
+              </>
+            )}
+          </div>
+        </Tab>
+
+        {/* PROCESSING PIPELINE — separate from "Pipeline" above. That tab
+            tracks the auto-derived per-bureau docs/calls workflow stage and
+            is click-to-filter; this one is the manually-selected
+            processing_stage (utils/processingStage.js), set by dragging a
+            client's card between columns. See ProcessingPipeline.jsx's own
+            header comment. */}
+        <Tab eventKey="processing_pipeline" title="Processing Pipeline">
+          <div className="mt-3">
+            {opsLoading ? (
+              <div className="text-center py-5">
+                <Spinner animation="border" />
+              </div>
+            ) : (
+              <>
+                <div className="d-flex justify-content-end mb-2">
+                  <Button size="sm" variant="outline-secondary" onClick={opsReload} disabled={opsLoading}>
+                    <i className="bi bi-arrow-clockwise me-1" />
+                    Refresh
+                  </Button>
+                </div>
+                <ProcessingPipeline clients={opsFilters.clients} companies={companies} scopeLabel={scopeLabel} />
               </>
             )}
           </div>

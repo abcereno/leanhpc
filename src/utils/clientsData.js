@@ -63,6 +63,7 @@ export const CLIENT_SUMMARY_SELECT = `
   is_paused, paused_at, paused_days_total,
   processing_duration, tu_eq_docs_submitted_at, last_report_update_at,
   approved_exp_count, approved_tu_count, approved_eq_count,
+  processing_stage, processing_stage_updated_at,
   company_tasks ( id, is_completed )
 `;
 
@@ -191,6 +192,19 @@ export async function fetchEnrichedClients() {
   if (baseErr && /last_report_update_at/i.test(baseErr.message || "")) {
     console.warn("clients.last_report_update_at not found (run sql/add_last_report_update.sql) — falling back without it.");
     selectedFields = selectedFields.replace(/last_report_update_at,\s*/, "");
+    ({ data: baseRows, error: baseErr } = await supabase
+      .from("clients")
+      .select(selectedFields)
+      .order("created_at", { ascending: false })
+      .range(0, 99999));
+  }
+
+  // sql/add_processing_stage.sql may not have been run yet either — same
+  // independent defensive fallback (ops/ProcessingPipeline.jsx just treats
+  // a missing/null processing_stage as "Not Started").
+  if (baseErr && /processing_stage/i.test(baseErr.message || "")) {
+    console.warn("clients.processing_stage not found (run sql/add_processing_stage.sql) — falling back without it.");
+    selectedFields = selectedFields.replace(/processing_stage, processing_stage_updated_at,\s*/, "");
     ({ data: baseRows, error: baseErr } = await supabase
       .from("clients")
       .select(selectedFields)

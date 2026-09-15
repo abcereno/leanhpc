@@ -208,9 +208,29 @@ function consolidateAccounts(accounts) {
 function consolidateInquiries(inquiries) {
     const merged = [];
     inquiries.forEach(inq => {
-        const match = merged.find(m => normalizeName(m.creditor) === normalizeName(inq.creditor) && m.date === inq.date);
+        // The bureau-exclusivity check (`!m.bureaus.includes(inq.bureau)`)
+        // matters — without it, two GENUINELY DIFFERENT inquiries from the
+        // same creditor+date that BOTH happen to come from the same single
+        // bureau (e.g. two separate applications to the same lender, same
+        // day) would match this same-creditor+date group and then get
+        // silently discarded below (`if (!match.bureaus.includes(...))`
+        // does nothing when that bureau's already in the array) — losing a
+        // real inquiry. Requiring the incoming bureau to be NEW to the
+        // group means it only ever merges when a DIFFERENT bureau is
+        // reporting the same real-world pull (the actual point of this
+        // function), never when the same bureau reports twice.
+        const match = merged.find(m => normalizeName(m.creditor) === normalizeName(inq.creditor) && m.date === inq.date && !m.bureaus.includes(inq.bureau));
         if (match) {
-            if (!match.bureaus.includes(inq.bureau)) match.bureaus.push(inq.bureau);
+            match.bureaus.push(inq.bureau);
+            // Keep singular `bureau` in sync with the array (same fix
+            // consolidateAccounts/consolidateNegatives already apply to
+            // their own merges — see their "Rewrite the string" comments)
+            // so ANY consumer that reads `.bureau` instead of `.bureaus`
+            // sees every bureau this inquiry hit, not just the first one
+            // processed. buildThreadFromAudit.js was bitten by exactly
+            // this gap — it read stale `.bureau` and silently dropped an
+            // inquiry from 2 of its 3 bureau buckets in thread.json.
+            match.bureau = match.bureaus.join(', ');
         } else {
             merged.push({ ...inq, bureaus: [inq.bureau] });
         }
@@ -233,9 +253,32 @@ function consolidateNegatives(negatives) {
             if ((m.category === 'UTILIZATION') !== (neg.category === 'UTILIZATION')) return false;
             // 👆 End Safety Fence
 
+            // 🚧 FIX #3: INQUIRY items are distinct EVENTS, not accounts 🚧
+            // Every other category here (COLLECTION/LATE_PAYMENT/UTILIZATION)
+            // represents the same underlying account reported by multiple
+            // bureaus, so merging by name/account_num alone is correct — it's
+            // still one account. An INQUIRY negative has no account_num
+            // (cleanNum is always "" for these, see the push in
+            // parseMergeReport's inquiries loop), so without a date check
+            // two SEPARATE hard pulls from the same creditor on different
+            // dates would collapse into one negatives-list row, silently
+            // dropping one date from the Classic Report's derogatory items
+            // table. consolidateInquiries (the array thread.json's
+            // experian/transunion/equifax buckets come from) already
+            // requires date to match before merging — this brings
+            // consolidateNegatives' INQUIRY handling in line with that.
+            if (neg.category === 'INQUIRY' && m.date !== neg.date) return false;
+            // Same reasoning as consolidateInquiries' bureau-exclusivity
+            // check: two genuinely different same-creditor/same-date
+            // inquiries reported by the SAME bureau must never merge into
+            // one negatives-list row (that would silently drop one), so
+            // only let this candidate match if its bureau isn't already
+            // accounted for in the group.
+            if (neg.category === 'INQUIRY' && Array.isArray(m.bureaus) && m.bureaus.includes(neg.bureau)) return false;
+
             const mClean = (m.account_num || "").replace(/[^0-9]/g, '');
             const mName = normalizeName(m.name);
-            
+
             const numMatch = (cleanNum.length > 3 && mClean.length > 3) && (cleanNum.includes(mClean) || mClean.includes(cleanNum));
             // Looser name matching
             const nameMatch = normName === mName || (normName.length > 3 && mName.length > 3 && (normName.includes(mName) || mName.includes(normName)));

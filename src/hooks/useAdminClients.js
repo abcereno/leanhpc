@@ -195,6 +195,7 @@ export default function useAdminClients() {
             admin_id, company_id, agent, progress,
             is_paused, paused_at, paused_days_total,
             processing_duration,
+            processing_stage, processing_stage_updated_at,
             company_tasks ( id, is_completed )
       `;
 
@@ -205,13 +206,20 @@ export default function useAdminClients() {
         .order("created_at", { ascending: false })
         .range(0, 99999);
 
-      // sql/add_dispute_round.sql and/or sql/add_services.sql may not have
-      // been run yet on this database — rather than let one missing
-      // optional column blank out the entire client list (which is exactly
-      // what happened here before), drop whichever is missing and retry.
+      // sql/add_dispute_round.sql and/or sql/add_services.sql (and now
+      // sql/add_processing_stage.sql) may not have been run yet on this
+      // database — rather than let one missing optional column blank out
+      // the entire client list (which is exactly what happened here
+      // before), drop whichever is missing and retry.
       for (const [col, sqlFile] of [
         ["dispute_round", "sql/add_dispute_round.sql"],
         ["service_id", "sql/add_services.sql"],
+        // Both columns land in one migration — listed separately since the
+        // strip-and-retry loop below removes one exact comma-token at a
+        // time, and either column's name could be the one that shows up in
+        // the Postgres error message first.
+        ["processing_stage", "sql/add_processing_stage.sql"],
+        ["processing_stage_updated_at", "sql/add_processing_stage.sql"],
       ]) {
         if (baseErr && selectedFields.includes(col) && new RegExp(col, "i").test(baseErr.message || "")) {
           console.warn(`clients.${col} not found (run ${sqlFile}) — falling back without it.`);
@@ -363,6 +371,34 @@ export default function useAdminClients() {
     }));
 
   }, [holidaySet, confirm]);
+
+  // Sets the manually-selected processing stage (see utils/processingStage.js)
+  // straight from the client list row — same optimistic-update/error-toast
+  // shape as handleTogglePause above, no confirmation needed since this is a
+  // low-stakes, easily-reversible pick from a fixed list. `stageId` is one of
+  // PROCESSING_STAGES' ids, or null/"" to clear back to "Not Started."
+  const handleSetProcessingStage = useCallback(async (clientId, stageId) => {
+    if (!clientId) return;
+    const nowIso = new Date().toISOString();
+    const nextValue = stageId || null;
+
+    setAllClients((prev) => prev.map((c) =>
+      c.id === clientId ? { ...c, processing_stage: nextValue, processing_stage_updated_at: nowIso } : c
+    ));
+
+    const { error: upErr } = await supabase
+      .from('clients')
+      .update({ processing_stage: nextValue, processing_stage_updated_at: nowIso })
+      .eq('id', clientId);
+
+    if (upErr) {
+      console.error('[useAdminClients] set processing stage error', upErr);
+      addToast({ title: "Update Failed", message: "Could not save processing stage (run sql/add_processing_stage.sql if it hasn't been run yet): " + upErr.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+      // Revert isn't possible without the prior value handy here — a
+      // reload() picks up the true DB state; not auto-triggered so a
+      // transient failure doesn't yank focus away from the dropdown.
+    }
+  }, []);
 
   // Set Paid Days Handler
   const handleSetPaidDays = useCallback(async (clientId) => {
@@ -601,6 +637,7 @@ export default function useAdminClients() {
     handleDeleteClient, 
     resetFilters, reload,
     handleTogglePause,
+    handleSetProcessingStage,
     handleSetPaidDays,
     handleSetPaidAt,
   };

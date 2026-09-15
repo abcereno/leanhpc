@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Modal, Button, Row, Col, Card, Badge, Spinner } from "react-bootstrap";
+import { Modal, Button, Row, Col, Card, Badge, Spinner, Form } from "react-bootstrap";
 import { supabase } from "../../../../supabaseClient";
 import { isBlankStartInquiries, computeAiCounts } from "../../../../utils/inquiryCounts";
 import { useToast } from "../../../shared/ui/ToastNotifier";
 import useClientNotes from "../../../../hooks/useClientNotes";
 import { useConfirm } from "../../../shared/ui/ConfirmDialog";
 import { GAP_REASON_PRESETS, gapKeyFor } from "../../../../utils/timelineGapNotes";
+import { PROCESSING_STAGES, processingStageLabel } from "../../../../utils/processingStage";
 
 // Below this many days between two consecutive completed timeline steps,
 // the gap isn't worth flagging — normal same-day/next-day turnaround
@@ -24,7 +25,15 @@ const BUCKET = "clients";
 // something partners should see or be able to add. Defaulting to false
 // (rather than CoverLetterAssets.jsx's showAiResults=true default) means a
 // future new call site that forgets to pass this stays safe by default.
-export default function ClientSummaryModal({ show, onClose, client, companyName, showGapReasons = false }) {
+// `canEditProcessingStage` (default false) gates the dropdown that lets
+// staff manually pick where a file sits in the dispute cycle (see
+// utils/processingStage.js). Same reasoning as showGapReasons above — this
+// is a staff data-entry action, so only the admin call site
+// (AdminClientList.jsx) opts in. The resulting LABEL is shown to everyone
+// (it's the whole point — partners seeing "Letter Created & Sent" instead
+// of a static "In Progress" for weeks), only the ability to CHANGE it is
+// admin-gated.
+export default function ClientSummaryModal({ show, onClose, client, companyName, showGapReasons = false, canEditProcessingStage = false }) {
   const { addToast } = useToast();
   const { confirm } = useConfirm();
   const [loading, setLoading] = useState(true);
@@ -49,6 +58,26 @@ export default function ClientSummaryModal({ show, onClose, client, companyName,
   // visible in the company/broker portal too, so it can't be gated behind
   // showGapReasons — it just degrades to "no reason on file" instead.
   const [pauseReason, setPauseReason] = useState(null);
+
+  // Fetched separately from the main dateData query too, same reasoning as
+  // pauseReason above — sql/add_processing_stage.sql may not be run yet,
+  // and this should degrade to the pre-existing generic "In Progress" text
+  // rather than breaking the whole modal.
+  const [processingStage, setProcessingStage] = useState(null);
+  const [processingStageUpdatedAt, setProcessingStageUpdatedAt] = useState(null);
+  const [savingProcessingStage, setSavingProcessingStage] = useState(false);
+
+  // Lets an admin correct the "Paused" step's date directly on the
+  // timeline — same reasoning as the pause-wording fix earlier: staff
+  // sometimes toggle Pause/Resume today to demo something or catch up on
+  // paperwork for a pause that actually started earlier, and paused_at
+  // (set to `now()` by togglePause in useClientActions.js) has no other
+  // way to be corrected afterward. Gated by showGapReasons — same
+  // "internal, staff-only timeline editing" flag as the gap reason editor
+  // above, admin-only call site only (see AdminClientList.jsx).
+  const [editingPauseDate, setEditingPauseDate] = useState(false);
+  const [pauseDateDraft, setPauseDateDraft] = useState("");
+  const [savingPauseDate, setSavingPauseDate] = useState(false);
 
   // Reasons for gaps on the Operational Timeline below (e.g. "why did 5
   // days pass between Payment and Documents") — stored as gap_key-tagged
@@ -117,6 +146,23 @@ export default function ClientSummaryModal({ show, onClose, client, companyName,
         } catch (pauseFetchErr) {
           console.warn("pause_reason unavailable (migration likely not run yet):", pauseFetchErr.message);
           setPauseReason(null);
+        }
+
+        // 1c. Fetch processing_stage in isolation — see the
+        // processingStage state comment above for why.
+        try {
+          const { data: stageData, error: stageErr } = await supabase
+            .from('clients')
+            .select('processing_stage, processing_stage_updated_at')
+            .eq('id', client.id)
+            .single();
+          if (stageErr) throw stageErr;
+          setProcessingStage(stageData?.processing_stage || null);
+          setProcessingStageUpdatedAt(stageData?.processing_stage_updated_at || null);
+        } catch (stageFetchErr) {
+          console.warn("processing_stage unavailable (run sql/add_processing_stage.sql if it doesn't exist yet):", stageFetchErr.message);
+          setProcessingStage(null);
+          setProcessingStageUpdatedAt(null);
         }
 
         // 2. Fetch Inquiry Thread JSON
@@ -244,13 +290,53 @@ export default function ClientSummaryModal({ show, onClose, client, companyName,
       const completedDate = isCompleted ? (cData.completed_at || cData.updated_at) : null;
       const inquiryDate = hasInquiryCount ? (cData.updated_at || cData.created_at) : null;
 
+      // Manually-selected stage (utils/processingStage.js) takes over the
+      // "Processing" step's stateText once set and not yet Completed —
+      // replaces the generic "In Progress" that used to be the only option
+      // for the entire dispute cycle, however many weeks it ran.
+      // `isProcessing`/`stageUpdatedAt` are carried on the step object so
+      // the render loop below can show the admin-only edit dropdown.
+      const stageLabel = processingStageLabel(processingStage);
+      const isProcessing = hasProcessingStarted && !isCompleted;
+
+      // Surfaces the SAME pause info as the banner above the timeline
+      // (is_paused/paused_at/pauseReason) as its own step inline with
+      // everything else, so company partners scrolling the timeline see
+      // WHEN a pause happened, WHY, and HOW LONG it's been — not just a
+      // banner at the very top that's easy to miss once you're looking at
+      // the step list. Only rendered while CURRENTLY paused — paused_at is
+      // cleared on resume (see useClientActions.js#togglePause), so there's
+      // no reliable "when" left to show once resumed, matching why the
+      // banner itself is also `is_paused`-gated rather than showing
+      // historical pauses.
+      const isPaused = !!cData.is_paused;
+      const pauseDate = isPaused ? cData.paused_at : null;
+      const pauseDays = pauseDate
+          ? Math.max(1, Math.ceil((Date.now() - new Date(pauseDate)) / (1000 * 60 * 60 * 24)))
+          : null;
+
       // Includes Both StateText & Date mapping!
       return [
           { label: "Client Submitted", stateText: "Submitted", active: true, date: cData.created_at },
           { label: "Inquiry Count", stateText: hasInquiryCount ? "Completed" : "Pending", active: hasInquiryCount, date: inquiryDate },
           { label: "Payment", stateText: isPaid ? "Received" : "Pending", active: isPaid, date: paymentDate },
           { label: "Documents", stateText: hasDocs ? "Received" : "Pending", active: hasDocs, date: docsDate },
-          { label: "Processing", stateText: isCompleted ? "Completed" : (hasProcessingStarted ? "In Progress" : "Pending"), active: hasProcessingStarted, date: processingDate },
+          {
+            label: "Processing",
+            stateText: isCompleted ? "Completed" : (stageLabel || (hasProcessingStarted ? "In Progress" : "Pending")),
+            active: hasProcessingStarted,
+            date: processingDate,
+            isProcessing,
+            stageUpdatedAt: processingStageUpdatedAt,
+          },
+          ...(isPaused ? [{
+            label: "Paused",
+            stateText: pauseReason || "No reason on file",
+            active: true,
+            date: pauseDate,
+            isPause: true,
+            pauseDays,
+          }] : []),
           { label: "Complete", stateText: isCompleted ? "Completed" : "Pending", active: isCompleted, date: completedDate }
       ];
   };
@@ -263,7 +349,12 @@ export default function ClientSummaryModal({ show, onClose, client, companyName,
   // flagging; same-day turnaround isn't.
   const timelineWithGaps = timeline.map((step, idx) => {
     const next = timeline[idx + 1];
-    if (!showGapReasons || !(step.active && step.date && next?.active && next.date)) {
+    // The synthetic "Paused" step already explains its own gap (that's the
+    // whole point of it) — computing a second, separate gap badge against
+    // its neighbor would just repeat the same stall with a redundant
+    // "Xd gap, add a reason" prompt right next to the pause reason already
+    // shown on the step itself.
+    if (!showGapReasons || step.isPause || next?.isPause || !(step.active && step.date && next?.active && next.date)) {
       return { ...step, gap: null };
     }
     const diffDays = (new Date(next.date) - new Date(step.date)) / (1000 * 60 * 60 * 24);
@@ -287,6 +378,50 @@ export default function ClientSummaryModal({ show, onClose, client, companyName,
       setGapReasonDraft("");
     } finally {
       setSavingGapKey(null);
+    }
+  };
+
+  // Saves the manually-selected processing stage — admin-only (gated by
+  // canEditProcessingStage in the render below), fails loudly via toast
+  // since this is a deliberate staff action, not a soft background sync.
+  const handleSetProcessingStage = async (newStageId) => {
+    if (!client?.id || savingProcessingStage) return;
+    setSavingProcessingStage(true);
+    const nowIso = new Date().toISOString();
+    try {
+      const { error } = await supabase
+        .from("clients")
+        .update({ processing_stage: newStageId || null, processing_stage_updated_at: nowIso })
+        .eq("id", client.id);
+      if (error) throw error;
+      setProcessingStage(newStageId || null);
+      setProcessingStageUpdatedAt(nowIso);
+    } catch (err) {
+      addToast({ title: "Update Failed", message: "Could not save processing stage (run sql/add_processing_stage.sql if it hasn't been run yet): " + err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+    } finally {
+      setSavingProcessingStage(false);
+    }
+  };
+
+  // Saves a corrected pause date — same fail-loudly-via-toast reasoning as
+  // handleSetProcessingStage above. `dateStr` is a plain YYYY-MM-DD from the
+  // <input type="date"> below; saved as local midnight on that day since
+  // paused_at's exact time-of-day was never shown/meaningful to begin with
+  // (only the date is displayed anywhere this value is used).
+  const handleSavePauseDate = async (dateStr) => {
+    if (!client?.id || !dateStr) return;
+    setSavingPauseDate(true);
+    try {
+      const iso = new Date(`${dateStr}T00:00:00`).toISOString();
+      const { error } = await supabase.from("clients").update({ paused_at: iso }).eq("id", client.id);
+      if (error) throw error;
+      setClientDates((prev) => (prev ? { ...prev, paused_at: iso } : prev));
+      setEditingPauseDate(false);
+      addToast({ title: "Pause Date Updated", message: "The Paused step now reflects the corrected date.", variant: "success", icon: "bi-check-circle-fill" });
+    } catch (err) {
+      addToast({ title: "Update Failed", message: "Could not save pause date: " + err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+    } finally {
+      setSavingPauseDate(false);
     }
   };
 
@@ -434,16 +569,16 @@ EQ:  ${fmt('Equifax')}
                                     <div className="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0 z-2 mt-1"
                                          style={{
                                              width: '24px', height: '24px',
-                                             backgroundColor: step.active ? theme.accentBlue : theme.bgCard,
-                                             border: `2px solid ${step.active ? theme.accentBlue : theme.border}`,
-                                             color: step.active ? '#fff' : 'transparent'
+                                             backgroundColor: step.active ? (step.isPause ? theme.warning : theme.accentBlue) : theme.bgCard,
+                                             border: `2px solid ${step.active ? (step.isPause ? theme.warning : theme.accentBlue) : theme.border}`,
+                                             color: step.active ? (step.isPause ? '#000' : '#fff') : 'transparent'
                                          }}>
-                                        {step.active && <i className="bi bi-check" style={{ fontSize: '12px' }}></i>}
+                                        {step.active && <i className={`bi ${step.isPause ? 'bi-pause-fill' : 'bi-check'}`} style={{ fontSize: '12px' }}></i>}
                                     </div>
                                     <div className="ms-3">
                                         <h6 className={`fw-bold mb-1 ${step.active ? 'text-white' : 'text-muted'}`} style={{ fontSize: '0.9rem' }}>{step.label}</h6>
                                         <div className="d-flex flex-column gap-1">
-                                            <small className="font-monospace text-uppercase fw-bold" style={{ color: step.active ? theme.accentBlue : theme.textMuted, fontSize: '0.7rem' }}>
+                                            <small className="font-monospace text-uppercase fw-bold" style={{ color: step.active ? (step.isPause ? theme.warning : theme.accentBlue) : theme.textMuted, fontSize: '0.7rem' }}>
                                                 {step.stateText}
                                             </small>
                                             {/* 👇 Stacked date right below the state text 👇 */}
@@ -451,6 +586,76 @@ EQ:  ${fmt('Equifax')}
                                                 <small className="font-monospace text-muted" style={{ fontSize: '0.65rem' }}>
                                                     {new Date(step.date).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}
                                                 </small>
+                                            )}
+                                            {/* How long this pause has run so far — the banner above only
+                                                shows "since [date]", this spells out the elapsed count so
+                                                partners don't have to do the math themselves. */}
+                                            {step.isPause && step.pauseDays != null && (
+                                                <small className="fw-bold" style={{ color: theme.warning, fontSize: '0.65rem' }}>
+                                                    {step.pauseDays} day{step.pauseDays === 1 ? '' : 's'} so far
+                                                </small>
+                                            )}
+                                            {/* Admin-only pause date correction — same gate as the gap
+                                                reason editor (showGapReasons), since this is the same
+                                                "internal timeline editing" capability. */}
+                                            {step.isPause && showGapReasons && (
+                                                editingPauseDate ? (
+                                                    <div className="d-flex align-items-center gap-1 mt-1">
+                                                        <Form.Control
+                                                            type="date"
+                                                            size="sm"
+                                                            autoFocus
+                                                            value={pauseDateDraft}
+                                                            disabled={savingPauseDate}
+                                                            onChange={(e) => setPauseDateDraft(e.target.value)}
+                                                            style={{ backgroundColor: theme.headerBg, color: theme.textMain, borderColor: theme.border, fontSize: '0.7rem', width: '140px' }}
+                                                        />
+                                                        <Button size="sm" variant="warning" disabled={savingPauseDate || !pauseDateDraft} onClick={() => handleSavePauseDate(pauseDateDraft)} style={{ fontSize: '0.65rem' }}>
+                                                            {savingPauseDate ? <Spinner size="sm" animation="border" /> : "Save"}
+                                                        </Button>
+                                                        <Button size="sm" variant="outline-secondary" disabled={savingPauseDate} onClick={() => setEditingPauseDate(false)} style={{ fontSize: '0.65rem' }}>
+                                                            Cancel
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <Button
+                                                        variant="link"
+                                                        size="sm"
+                                                        className="p-0 mt-1"
+                                                        style={{ fontSize: '0.7rem' }}
+                                                        onClick={() => {
+                                                            const d = step.date ? new Date(step.date) : new Date();
+                                                            setPauseDateDraft(d.toISOString().split('T')[0]);
+                                                            setEditingPauseDate(true);
+                                                        }}
+                                                    >
+                                                        <i className="bi bi-pencil-square me-1"></i>Edit date
+                                                    </Button>
+                                                )
+                                            )}
+                                            {/* Admin-only stage picker — see canEditProcessingStage's own
+                                                comment above the component signature for why this is the
+                                                one editable control on the timeline besides gap reasons. */}
+                                            {step.label === "Processing" && canEditProcessingStage && (
+                                                <div className="mt-1" style={{ maxWidth: '220px' }}>
+                                                    <Form.Select
+                                                        size="sm"
+                                                        value={processingStage || ""}
+                                                        disabled={savingProcessingStage}
+                                                        onChange={(e) => handleSetProcessingStage(e.target.value)}
+                                                        style={{ backgroundColor: theme.headerBg, color: theme.textMain, borderColor: theme.border, fontSize: '0.7rem' }}
+                                                    >
+                                                        <option value="">— Select stage —</option>
+                                                        {PROCESSING_STAGES.map((s) => (
+                                                            <option key={s.id} value={s.id}>{s.label}</option>
+                                                        ))}
+                                                    </Form.Select>
+                                                    {step.stageUpdatedAt && (
+                                                        <small className="font-monospace text-muted d-block mt-1" style={{ fontSize: '0.62rem' }}>
+                                                            Updated {new Date(step.stageUpdatedAt).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}
+                                                        </small>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                     </div>

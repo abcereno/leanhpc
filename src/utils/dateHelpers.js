@@ -86,5 +86,13 @@ export function calculateBusinessDays(startDate, endDate, holidaySet) {
     curDate.setDate(curDate.getDate() + 1);
   }
 
-  return count > 0 ? count + 1 : 0;
+  // The loop above is already inclusive of both start AND end (it runs
+  // `while (curDate <= end)`), so a Mon-Fri range already correctly counts
+  // 5 — there was never a day the loop skipped that needed adding back.
+  // The old `count + 1` on top of that double-counted every range by one:
+  // a client created and viewed the SAME day (start === end, e.g. "just
+  // submitted today") has count=1 after the loop, then read back as 2 days
+  // old. A 5-business-day Mon-Fri span read back as 6. Returning the raw
+  // count fixes both — day 1 shows as 1d, not 2d.
+  return count;
 }

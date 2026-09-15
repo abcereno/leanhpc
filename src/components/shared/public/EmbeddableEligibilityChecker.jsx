@@ -116,7 +116,17 @@ export default function EmbeddableEligibilityChecker() {
                           body: JSON.stringify({ email: username, password, months: 24 }),
                       });
                       const anJson = await analysisRes.json();
-                      if (!analysisRes.ok) throw new Error(anJson.error || "SmartCredit Analysis failed.");
+                      if (!analysisRes.ok) {
+                          // credit_analysis's 401 body carries SmartCredit's own
+                          // rejection detail under smartCreditResponse (see
+                          // supabase/functions/credit_analysis/index.ts) — surface
+                          // that specific reason (bad password vs MFA required vs
+                          // a bot challenge) instead of just the generic "Login
+                          // failed" wrapper, since that's the difference between
+                          // "re-enter your password" and "this needs a person."
+                          const scDetail = anJson.smartCreditResponse?.message || anJson.smartCreditResponse?.error || anJson.smartCreditResponse?.reason;
+                          throw new Error(scDetail || anJson.error || "SmartCredit Analysis failed.");
+                      }
 
                       const root = Array.isArray(anJson) ? anJson[0] : anJson;
                       const isRaw = root.BundleComponents || root.report?.BundleComponents;
@@ -164,7 +174,25 @@ export default function EmbeddableEligibilityChecker() {
                   attempts++;
                   setRetryCount(attempts);
                   if (attempts >= maxRetries || err.message.includes("coming soon")) {
-                      throw new Error(err.message.includes("coming soon") ? err.message : "Connection timed out. Please verify credentials.");
+                      // Previously collapsed every failure into one generic
+                      // "Connection timed out" phrase after 3 retries — that
+                      // made a bad password look identical to a real backend
+                      // outage, a proxy block, or IDIQ bouncing the login,
+                      // and there was nothing in the UI (or console) to tell
+                      // them apart. Now the real message from the failing
+                      // leg (SmartCredit's own rejection reason, the IDIQ
+                      // puppeteer error, a network failure, etc.) is kept
+                      // and shown, with a short generic hint appended so a
+                      // non-technical visitor still gets an actionable
+                      // takeaway even when the underlying message is terse.
+                      const detail = (err.message || "").trim();
+                      throw new Error(
+                          detail.includes("coming soon")
+                              ? detail
+                              : detail
+                                  ? `${detail} — please verify your credentials, or try again in a moment.`
+                                  : "Connection timed out. Please verify credentials."
+                      );
                   }
                   await new Promise(res => setTimeout(res, 5000));
               }
@@ -225,8 +253,18 @@ export default function EmbeddableEligibilityChecker() {
       setErrorMsg("");
 
       try {
-          const queryParams = new URLSearchParams(window.location.search);
-          const contextualCompanyId = queryParams.get("partner") || "e33ef166-d381-458e-a5c8-ac77557d5ea2"; 
+          // Every lead from this public checker is attributed to LTOS —
+          // this is the only company currently running the ad funnel that
+          // embeds this widget (web.hiddenpartnercloud.com's Partners and
+          // Brokers pages both iframe this page with no ?partner= param at
+          // all). Previously this fell back to LTOS's id only when a
+          // ?partner= param was ABSENT, which happened to produce the same
+          // result today only because nothing ever sets that param — a
+          // silent accident, not a guarantee. Hardcoded outright so a
+          // future embed can't accidentally misattribute leads by adding
+          // one. LTOS's id confirmed live via companies table: id
+          // e33ef166-d381-458e-a5c8-ac77557d5ea2, company_name "LTOS".
+          const contextualCompanyId = "e33ef166-d381-458e-a5c8-ac77557d5ea2";
           const cleanedEmail = leadEmail.toLowerCase().trim();
 
           const { count: existingEmailRows, error: countError } = await supabase

@@ -130,7 +130,12 @@ export default function ServiceClientList({ serviceId, refreshKey, onCheckEligib
 
         enrichedData.sort((a, b) => {
             if (b.pendingCount !== a.pendingCount) return b.pendingCount - a.pendingCount;
-            return new Date(b.created_at) - new Date(a.created_at);
+            // Every row on this list is already paid (see the fetch filter
+            // above) — sort by paid_at, not created_at ("count date"), so
+            // ordering reflects when a client actually started as a paying
+            // file rather than when they were originally counted/added,
+            // which can be weeks or months earlier for a returning client.
+            return new Date(b.paid_at || b.created_at) - new Date(a.paid_at || a.created_at);
         });
 
         setClients(enrichedData);
@@ -231,7 +236,7 @@ export default function ServiceClientList({ serviceId, refreshKey, onCheckEligib
             <th>Agent</th>
             <th>Status & Badges</th>
             <th>Progress</th>
-            <th>Created</th>
+            <th>Paid</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -281,7 +286,7 @@ export default function ServiceClientList({ serviceId, refreshKey, onCheckEligib
                         </span>
                     </div>
                   </td>
-                  <td>{new Date(client.created_at).toLocaleDateString()}</td>
+                  <td>{new Date(client.paid_at || client.created_at).toLocaleDateString()}</td>
 
                   <td>
                     <div className="d-flex align-items-center gap-2">

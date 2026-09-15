@@ -29,11 +29,24 @@ export function buildThreadFromAudit(auditResult) {
     openClosed: acc.status,
   }));
 
+  // auditEngine.js's consolidateInquiries() merges the same creditor+date
+  // seen on multiple bureaus into ONE inquiry object carrying a `bureaus`
+  // ARRAY (e.g. ["EX","TU","EQ"]) — `.bureau` (singular) is left over from
+  // whichever bureau's raw record happened to be processed first and does
+  // NOT mean "this is the only bureau it's on". Bucketing off `.bureau`
+  // here silently dropped every inquiry from its OTHER bureaus' thread
+  // arrays — for a typical inquiry that hits all 3 bureaus, 2 of the 3
+  // would vanish from thread.json entirely. Matches the bureaus-array
+  // pattern reportAutoImport.js#runIdiqImport and ParseRreportModal.jsx
+  // already use correctly for the same data.
+  const hasBureau = (item, code) =>
+    Array.isArray(item.bureaus) ? item.bureaus.includes(code) : item.bureau === code;
+
   inquiries.forEach((inq) => {
     const item = { date: inq.date, creditor: inq.creditor };
-    if (inq.bureau === "EX") thread.experian.push(item);
-    if (inq.bureau === "TU") thread.transunion.push(item);
-    if (inq.bureau === "EQ") thread.equifax.push(item);
+    if (hasBureau(inq, "EX")) thread.experian.push(item);
+    if (hasBureau(inq, "TU")) thread.transunion.push(item);
+    if (hasBureau(inq, "EQ")) thread.equifax.push(item);
   });
 
   return thread;

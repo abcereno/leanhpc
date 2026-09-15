@@ -129,3 +129,88 @@ export async function insertClientRecord(payload, options = {}) {
 
   return { data, error };
 }
+
+// --- Identity document duplication for "Start New Round" ---
+//
+// Both identity-document uploaders — CoverLetterAssets.jsx (legacy admin,
+// doc_type in license/ssn/poa) and CoverLetterAssetsLTOS.jsx (company
+// portal/public intake, file_name in identity/address/authorization) —
+// share the SAME bucket ("cover-letter-assets") and the SAME convention:
+// client_documents.file_url stores the raw storage path
+// (`${clientId}/${key}.${ext}`), not a public URL — read access goes
+// through createSignedUrl() at render time. So copying a document to a
+// new round is a plain download()+upload() byte copy at a new path, no
+// URL-parsing needed. (AddClientSidebar.jsx's generic multi-file uploader
+// is a third, unrelated flow — bucket "clients", public URLs, no
+// doc_type — but its rows are never tagged license/ssn/poa/identity/
+// address/authorization, so the filters below already exclude them.)
+//
+// Scope matches useAlignmentDocs.js's identitySlot() filter exactly:
+// identity docs only (ID, proof of address, POA/authorization) — NOT
+// ftc_report or letter rows, since those are work-product tied to the
+// OLD round's classified inquiry data, not portable "client information".
+const IDENTITY_DOC_BUCKET = "cover-letter-assets";
+const IDENTITY_DOC_TYPES = ["license", "ssn", "poa"];
+const IDENTITY_FILE_NAMES = ["identity", "address", "authorization"];
+
+/**
+ * Copies every identity document (ID/SSN/POA/authorization) from
+ * `oldClientId` to `newClientId` — new storage object + new
+ * client_documents row each, carrying over validation_status/
+ * validation_notes/validation_details since it's the same physical
+ * document being re-attached to a new round, not re-validated.
+ *
+ * Never throws — a document that fails to copy (missing file, storage
+ * error, etc.) is just skipped and counted, so one bad row can't block
+ * the whole "start new round" action. Callers should surface `skipped`
+ * to the admin so they know to re-upload anything that didn't make it.
+ */
+export async function copyIdentityDocuments(oldClientId, newClientId) {
+  const SELECT = "file_name, file_url, doc_type, validation_status, validation_notes, validation_details";
+
+  // Two plain .in() queries merged client-side, not .or() — same
+  // .or()-avoidance convention as useAlignmentDocs.js.
+  const [legacyRes, ltosRes] = await Promise.all([
+    supabase.from("client_documents").select(SELECT).eq("client_id", oldClientId).in("doc_type", IDENTITY_DOC_TYPES),
+    supabase.from("client_documents").select(SELECT).eq("client_id", oldClientId).in("file_name", IDENTITY_FILE_NAMES),
+  ]);
+
+  const rows = [...(legacyRes.data || []), ...(ltosRes.data || [])];
+  let copied = 0;
+  let skipped = 0;
+
+  for (const row of rows) {
+    if (!row.file_url) { skipped++; continue; }
+    try {
+      // file_url is already a bucket-relative path (`${oldClientId}/key.ext`)
+      // for both flows — drop the leading clientId segment and re-root it
+      // under the new client's id, preserving the filename/extension.
+      const tail = row.file_url.split("/").slice(1).join("/") || row.file_url;
+      const newPath = `${newClientId}/${tail}`;
+
+      const { data: blob, error: dlErr } = await supabase.storage.from(IDENTITY_DOC_BUCKET).download(row.file_url);
+      if (dlErr || !blob) { skipped++; continue; }
+
+      const { error: upErr } = await supabase.storage.from(IDENTITY_DOC_BUCKET)
+        .upload(newPath, blob, { upsert: true, contentType: blob.type || "application/octet-stream" });
+      if (upErr) { skipped++; continue; }
+
+      const { error: insErr } = await supabase.from("client_documents").insert({
+        client_id: newClientId,
+        file_name: row.file_name,
+        doc_type: row.doc_type,
+        file_url: newPath,
+        validation_status: row.validation_status,
+        validation_notes: row.validation_notes,
+        validation_details: row.validation_details,
+      });
+      if (insErr) { skipped++; continue; }
+      copied++;
+    } catch (e) {
+      console.warn("copyIdentityDocuments: failed to copy a document:", e);
+      skipped++;
+    }
+  }
+
+  return { copied, skipped, total: rows.length };
+}

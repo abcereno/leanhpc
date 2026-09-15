@@ -23,6 +23,7 @@ import InquiryLoader from "../shared/ui/InquiryLoader";
 import BulkEditModal from "./client-profile/BulkEditModal";
 import ClientSummaryModal from "./client-profile/modals/ClientSummaryModal";
 import { SERVICES, serviceLabel } from "../../utils/services";
+import { PROCESSING_STAGES } from "../../utils/processingStage";
 import ClientProfile from "./ClientProfile";
 import { useToast } from "../shared/ui/ToastNotifier";
 
@@ -56,6 +57,7 @@ export default function AdminClientList() {
     sortField, sortDirection, handleSort,
     handleDeleteClient,
     handleTogglePause,
+    handleSetProcessingStage,
     handleSetPaidAt,
     resetFilters,
   } = useAdminClients();
@@ -342,6 +344,7 @@ export default function AdminClientList() {
               <th className="text-center" style={{ width: "50px" }}>#</th>
               <SortableTh field="name">Client Profile</SortableTh>
               <th>Next Step</th>
+              <th style={{ minWidth: "160px" }}>Stage</th>
               <SortableTh field="company">Company</SortableTh>
               <SortableTh field="agent">Agent</SortableTh>
               <SortableTh field="progress" style={{ minWidth: "120px" }}>Progress</SortableTh>
@@ -352,7 +355,7 @@ export default function AdminClientList() {
           <tbody ref={tbodyRef}>
             {pagedClients.length === 0 ? (
               <tr>
-                <td colSpan="9" className="text-center py-5 text-muted">
+                <td colSpan="10" className="text-center py-5 text-muted">
                   <i className="bi bi-folder2-open display-6 d-block mb-3 opacity-50"></i>
                   No clients found matching your filters.
                 </td>
@@ -442,6 +445,26 @@ export default function AdminClientList() {
                         </Badge>
                       )}
                     </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      {/* Manually-selected processing stage (utils/processingStage.js)
+                          — only meaningful once paid, same gate as the
+                          Pause button and ClientHeader.jsx's own submenu. */}
+                      {client.is_paid ? (
+                        <Form.Select
+                          size="sm"
+                          value={client.processing_stage || ""}
+                          onChange={(e) => handleSetProcessingStage(client.id, e.target.value)}
+                          style={{ fontSize: "0.75rem" }}
+                        >
+                          <option value="">— Not Started —</option>
+                          {PROCESSING_STAGES.map((s) => (
+                            <option key={s.id} value={s.id}>{s.label}</option>
+                          ))}
+                        </Form.Select>
+                      ) : (
+                        <span className="text-muted small">—</span>
+                      )}
+                    </td>
                     <td className="text-muted fw-medium">{client.companies?.company_name || "—"}</td>
                     <td>
                       {client.profiles ? (
@@ -467,6 +490,20 @@ export default function AdminClientList() {
                           </div>
                         )}
                       </div>
+                      {/* "Active Xd" above is frozen at date_completed once
+                          set (dateHelpers.js#calculatePaidRunningDays) — it
+                          stops accruing the moment a client completes and
+                          never climbs afterward. But a bare frozen number
+                          gives no way to tell "this took Xd, whenever that
+                          was" apart from "this started Xd ago and is still
+                          running" — showing the actual date removes that
+                          ambiguity. */}
+                      {client.date_completed && (
+                        <div className="text-success mt-1" style={{ fontSize: '0.68rem' }} title="Set automatically once all 3 bureaus were done/N-A">
+                          <i className="bi bi-check-circle-fill me-1"></i>
+                          Completed {new Date(client.date_completed).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </div>
+                      )}
                     </td>
                     <td className="text-end pe-4">
                       <div className="d-flex justify-content-end align-items-center gap-2">
@@ -578,11 +615,13 @@ export default function AdminClientList() {
 
       {showCountInquiries && <SmartIdiQModal show={showCountInquiries} onClose={() => setShowCountInquiries(false)} />}
       <BulkEditModal show={showBulkEdit} onClose={() => setShowBulkEdit(false)} selectedIds={Array.from(selectedIds)} onSaved={() => { setSelectedIds(new Set()); resetFilters(); }} />
-      {/* showGapReasons=true here only — this modal is also rendered from
-          the company/broker portals' client lists, where Operational
-          Timeline gap reasons (internal delay context) shouldn't be
-          visible. See ClientSummaryModal.jsx's showGapReasons doc comment. */}
-      <ClientSummaryModal show={showSummary} onClose={handleCloseSummary} client={summaryClient} showGapReasons />
+      {/* showGapReasons=true / canEditProcessingStage=true here only — this
+          modal is also rendered from the company/broker portals' client
+          lists, where Operational Timeline gap reasons (internal delay
+          context) and the processing-stage picker shouldn't be visible/
+          editable. See ClientSummaryModal.jsx's own doc comments on both
+          props. */}
+      <ClientSummaryModal show={showSummary} onClose={handleCloseSummary} client={summaryClient} showGapReasons canEditProcessingStage />
       <FunderEligibilityModal show={showEligibilityModal} onHide={handleCloseEligibility} client={eligibilityClient} />
 
       <Modal show={showPaidModal} onHide={closePaidModal} centered size="sm">

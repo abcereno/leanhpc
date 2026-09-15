@@ -8,6 +8,7 @@ import { useClient } from "../../../hooks/useClient";
 import { useToast } from "../../shared/ui/ToastNotifier";
 import { saveUpdateAudit } from "../../../utils/reportStorage";
 import { serviceLabel, resolveServiceId } from "../../../utils/services";
+import { PROCESSING_STAGES, processingStageLabel } from "../../../utils/processingStage";
 
 // Extracted hooks
 import { usePiReveal } from "../../../hooks/usePiReveal";
@@ -201,6 +202,7 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
   const [isUpdateMode, setIsUpdateMode] = useState(false);
   const [agentDisplay, setAgentDisplay] = useState("Loading...");
   const [timeLeft, setTimeLeft] = useState(null);
+  const [startingRound, setStartingRound] = useState(false);
   const intervalRef = useRef(null);
 
   // Extracted hooks
@@ -333,6 +335,19 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
   const handleModalSave = async () => { await refetch(); if (onRefresh) onRefresh(); closeModal(); };
 
   const openTab = useCallback((path) => window.open(`${window.location.origin}${path}`, "_blank", "noopener,noreferrer"), []);
+
+  // See useClientActions.js#startNewRound for exactly what carries over vs.
+  // resets. Navigates straight to the freshly-created round's own profile
+  // on success, same as picking a round from RoundSwitcher above.
+  const handleStartNewRound = async () => {
+    setStartingRound(true);
+    try {
+      const newClientId = await actions.startNewRound();
+      if (newClientId) navigate(`/clients/${newClientId}`);
+    } finally {
+      setStartingRound(false);
+    }
+  };
 
 
   const fireCompletionWebhook = async () => {
@@ -546,6 +561,26 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                 <Badge bg={client.is_paid ? "success" : "danger"} className="ms-3">{client.is_paid ? "Paid" : "Unpaid"}</Badge>
                 <RoundSwitcher clientId={clientId} email={client.email} currentRound={client.dispute_round} />
                 {client.is_paused && <Badge bg="warning" text="dark" className="ms-2 shadow-sm"><i className="bi bi-pause-fill me-1" />PAUSED</Badge>}
+                {/* date_completed is set once, automatically, by the
+                    update_client_completion_status DB trigger the moment
+                    all 3 bureaus first read done/N-A (not by any button —
+                    the only frontend "Mark Complete" action, below, is
+                    dead for both current service families; see its own
+                    comment). Shown here so staff can see WHEN a client
+                    completed at a glance instead of only inferring it from
+                    a frozen "Active Xd" business-day count that gives no
+                    hint whether it's live or historical. */}
+                {client.date_completed && (
+                  <Badge bg="success" className="ms-2 shadow-sm" title="Set automatically once all 3 bureaus were done/N-A">
+                    <i className="bi bi-calendar-check-fill me-1" />
+                    Completed {new Date(client.date_completed).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </Badge>
+                )}
+                {client.is_paid && processingStageLabel(client.processing_stage) && (
+                  <Badge bg="info" text="dark" className="ms-2 shadow-sm" title="Set from the Status dropdown below">
+                    <i className="bi bi-signpost-split-fill me-1" />{processingStageLabel(client.processing_stage)}
+                  </Badge>
+                )}
                 {client.is_paid && (
                   <>
                     {client.exp_na ? <Badge bg="secondary" className="ms-2 shadow-sm">EXP N/A</Badge> : client.exp_completed ? <Badge bg="success" className="ms-2 shadow-sm">EXP DONE</Badge> : null}
@@ -726,6 +761,34 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                         <Dropdown.Menu className="shadow-lg border-secondary py-2">
                           {!client.is_paid && <Dropdown.Item onClick={() => setActiveModal("markPaid")} className="text-success fw-bold py-2"><i className="bi bi-currency-dollar me-2" /> Mark as Paid</Dropdown.Item>}
                           {client.is_paid  && <Dropdown.Item onClick={actions.togglePause} className="text-warning py-2"><i className={`bi bi-${client.is_paused ? "play" : "pause"}-fill me-2`} />{client.is_paused ? "Resume Service" : "Pause Service"}</Dropdown.Item>}
+                          {/* Undo for an accidental "Mark as Paid" click —
+                              see useClientActions.js#markAsUnpaid's own
+                              comment for exactly what this does and does
+                              NOT undo (Document Routing round, auto-recorded
+                              income, and the payment webhooks all stay). */}
+                          {client.is_paid && <Dropdown.Item onClick={actions.markAsUnpaid} className="text-danger py-2"><i className="bi bi-arrow-counterclockwise me-2" />Mark Unpaid (Undo)</Dropdown.Item>}
+                          {/* Manually-selected processing stage (see
+                              utils/processingStage.js) — where a file
+                              actually sits in the dispute cycle, so
+                              partners aren't staring at a static "In
+                              Progress" for weeks. Only meaningful once paid,
+                              same gate as Pause/Resume above. */}
+                          {client.is_paid && (
+                            <>
+                              <Dropdown.Header className="text-uppercase small fw-bold" style={{ fontSize: "0.7rem" }}>Processing Stage</Dropdown.Header>
+                              {PROCESSING_STAGES.map((s) => (
+                                <Dropdown.Item key={s.id} onClick={() => actions.setProcessingStage(s.id)} className={`py-2 ${client.processing_stage === s.id ? "fw-bold text-info" : ""}`}>
+                                  <i className={`bi ${client.processing_stage === s.id ? "bi-check-circle-fill" : "bi-circle"} me-2`} />
+                                  {s.label}
+                                </Dropdown.Item>
+                              ))}
+                              {client.processing_stage && (
+                                <Dropdown.Item onClick={() => actions.setProcessingStage(null)} className="text-muted py-2">
+                                  <i className="bi bi-x-circle me-2" /> Clear Stage
+                                </Dropdown.Item>
+                              )}
+                            </>
+                          )}
                           <Dropdown.Divider className="border-secondary opacity-25" />
                           <Dropdown.Item onClick={actions.toggleDispute} className={`${client.dont_dispute ? "text-danger" : "text-info"} py-2`}>
                             <i className={`bi bi-${client.dont_dispute ? "slash-circle" : "check-circle"} me-2`} />
@@ -837,6 +900,13 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                         <Dropdown.Item onClick={() => openTab(`/clients/${clientId}/funding`)} className="py-2"><i className="bi bi-filetype-pdf me-2 text-danger" /> Funding Blueprint</Dropdown.Item>
                         <Dropdown.Item onClick={() => openTab(`/clients/${clientId}/progress-report`)} className="py-2"><i className="bi bi-graph-up-arrow me-2 text-success" /> Progress Report</Dropdown.Item>
                         {hasPermission("edit_client") && <Dropdown.Item onClick={actions.updateStartDateToToday} className="py-2"><i className="bi bi-calendar-check me-2 text-primary" /> Set Start Date Today</Dropdown.Item>}
+                        {hasPermission("edit_client") && (
+                          <Dropdown.Item onClick={handleStartNewRound} disabled={startingRound} className="py-2">
+                            {startingRound
+                              ? <><Spinner animation="border" size="sm" className="me-2" /> Starting Round {(client.dispute_round || 1) + 1}...</>
+                              : <><i className="bi bi-arrow-repeat me-2 text-warning" /> Start New Round (Round {(client.dispute_round || 1) + 1})</>}
+                          </Dropdown.Item>
+                        )}
                         <Dropdown.Divider className="border-secondary opacity-25 my-2" />
                         <Dropdown.Item onClick={() => setActiveModal("ssnManager")} className="text-danger fw-bold py-2"><i className="bi bi-shield-lock me-2" /> SSN Manager</Dropdown.Item>
                       </Dropdown.Menu>
