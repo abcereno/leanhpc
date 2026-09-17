@@ -26,6 +26,7 @@ import { SERVICES, serviceLabel } from "../../utils/services";
 import { PROCESSING_STAGES } from "../../utils/processingStage";
 import ClientProfile from "./ClientProfile";
 import { useToast } from "../shared/ui/ToastNotifier";
+import { fetchAllRows } from "../../utils/fetchAllRows";
 
 export default function AdminClientList() {
   const { addToast } = useToast();
@@ -57,6 +58,7 @@ export default function AdminClientList() {
     sortField, sortDirection, handleSort,
     handleDeleteClient,
     handleTogglePause,
+    handleToggleInactive,
     handleSetProcessingStage,
     handleSetPaidAt,
     resetFilters,
@@ -64,7 +66,7 @@ export default function AdminClientList() {
 
   // Local Component State
   const [activeClientId, setActiveClientId] = useState(null);
-  const [tabCounts, setTabCounts] = useState({ all: 0, paid: 0, unpaid: 0, completed: 0, notCompleted: 0 });
+  const [tabCounts, setTabCounts] = useState({ all: 0, paid: 0, unpaid: 0, completed: 0, notCompleted: 0, inactive: 0 });
   const [showAddClient, setShowAddClient] = useState(false);
   const [showCountInquiries, setShowCountInquiries] = useState(false);
   const [helpRequests, setHelpRequests] = useState([]);
@@ -97,20 +99,44 @@ export default function AdminClientList() {
 
   useEffect(() => { if (tbodyRef.current) autoAnimate(tbodyRef.current); }, [tbodyRef]);
 
-  // Tab Counts Fetch
+  // Tab Counts Fetch — paginated via fetchAllRows (see utils/fetchAllRows.js)
+  // rather than a plain, unbounded .select(), which is just as subject to
+  // Supabase's project-level API "Max Rows" cap as a bare .range(0, 99999)
+  // is (no .range() at all just means "give me the default page," still
+  // capped at the same number). That's exactly why every badge here
+  // topped out at a suspiciously round 1000 regardless of activeTab or
+  // search — this fetch was silently truncated the same way the main
+  // list's own query was (see useAdminClients.js's reload()), just
+  // without even the defensive comment calling it out.
   useEffect(() => {
     const fetchTabCounts = async () => {
-      let q = supabase.from("clients").select("id, paid_at, all_completed");
-      if (!canSeeAllClients && user?.id) q = q.eq("admin_id", user.id);
-
-      const { data } = await q;
+      let { data, error } = await fetchAllRows("clients", {
+        select: "id, paid_at, all_completed, admin_id, is_inactive",
+        filter: (q) => (!canSeeAllClients && user?.id ? q.eq("admin_id", user.id) : q),
+      });
+      // sql/add_inactive_status.sql may not have been run yet — degrade to
+      // the counts as before (nothing filtered out as inactive) rather
+      // than losing every tab badge over one missing optional column.
+      if (error && /is_inactive/i.test(error.message || "")) {
+        console.warn("clients.is_inactive not found (run sql/add_inactive_status.sql) — tab counts falling back without it.");
+        ({ data, error } = await fetchAllRows("clients", {
+          select: "id, paid_at, all_completed, admin_id",
+          filter: (q) => (!canSeeAllClients && user?.id ? q.eq("admin_id", user.id) : q),
+        }));
+      }
       if (data) {
+        // Inactive clients are pulled out of every other tab's count (see
+        // useAdminClients.js's filteredClientList for the matching row
+        // filter) so these badges stay in sync with what each tab
+        // actually shows.
+        const active = data.filter((c) => !c.is_inactive);
         setTabCounts({
-          all: data.length,
-          paid: data.filter((c) => c.paid_at && !c.all_completed).length,
-          unpaid: data.filter((c) => !c.paid_at && !c.all_completed).length,
-          completed: data.filter((c) => c.all_completed).length,
-          notCompleted: data.filter((c) => c.paid_at && !c.all_completed).length,
+          all: active.length,
+          paid: active.filter((c) => c.paid_at && !c.all_completed).length,
+          unpaid: active.filter((c) => !c.paid_at && !c.all_completed).length,
+          completed: active.filter((c) => c.all_completed).length,
+          notCompleted: active.filter((c) => c.paid_at && !c.all_completed).length,
+          inactive: data.filter((c) => c.is_inactive).length,
         });
       }
     };
@@ -329,6 +355,11 @@ export default function AdminClientList() {
           <Tab eventKey="unpaid" title={<div className="d-flex align-items-center"><i className="bi bi-clock text-warning me-1"></i><span className="fw-medium px-1">Unpaid</span><Badge bg="warning" text="dark" className="ms-2 rounded-pill shadow-sm">{tabCounts.unpaid}</Badge></div>} />
           <Tab eventKey="not_completed" title={<div className="d-flex align-items-center"><i className="bi bi-hourglass-split text-info me-1"></i><span className="fw-medium px-1">Not Completed</span><Badge bg="info" text="dark" className="ms-2 rounded-pill shadow-sm">{tabCounts.notCompleted}</Badge></div>} />
           <Tab eventKey="completed" title={<div className="d-flex align-items-center"><i className="bi bi-check-circle text-primary me-1"></i><span className="fw-medium px-1">Completed</span><Badge bg="primary" className="ms-2 rounded-pill shadow-sm">{tabCounts.completed}</Badge></div>} />
+          {/* Inactive clients are excluded from every tab above (see
+              useAdminClients.js's filteredClientList) and only live here —
+              a client who's stopped engaging entirely, not the same as
+              Paused (which stays visible in its normal tab, just badged). */}
+          <Tab eventKey="inactive" title={<div className="d-flex align-items-center"><i className="bi bi-slash-circle text-secondary me-1"></i><span className="fw-medium px-1">Inactive</span><Badge bg="secondary" className="ms-2 rounded-pill shadow-sm">{tabCounts.inactive}</Badge></div>} />
         </Tabs>
 
         <div className="text-muted small fw-bold bg-light px-3 py-2 rounded shadow-sm border border-secondary border-opacity-25">
@@ -411,9 +442,19 @@ export default function AdminClientList() {
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => setSelectedRoundByGroup((prev) => ({ ...prev, [group.key]: e.target.value }))}
                           >
-                            {group.rounds.map((r) => (
+                            {/* Labeled by chronological position (idx+1), not the
+                                stored dispute_round — same fix as ClientHeader.jsx's
+                                RoundSwitcher and for the same reason: legacy rows can
+                                share a dispute_round value (several genuinely
+                                different rounds all stuck at 1), which showed
+                                indistinguishable "Round 1" entries here. This is a
+                                separate implementation of the same round-switcher UI
+                                (group.rounds here comes from useAdminClients.js's
+                                already-fetched/grouped data rather than its own
+                                query), so it needed the same fix applied separately. */}
+                            {group.rounds.map((r, idx) => (
                               <option key={r.id} value={r.id}>
-                                Round {r.dispute_round || 1}{r.id === group.rounds[group.rounds.length - 1].id ? " (current)" : ""}
+                                Round {idx + 1}{r.id === group.rounds[group.rounds.length - 1].id ? " (current)" : ""}
                               </option>
                             ))}
                           </Form.Select>
@@ -422,6 +463,7 @@ export default function AdminClientList() {
                         )}
                         {client.is_paid && <Badge bg="success" className="shadow-sm" style={{fontSize: '0.65rem'}}><i className="bi bi-currency-dollar"></i> PAID</Badge>}
                         {client.is_paused && <Badge bg="warning" text="dark" className="shadow-sm" style={{fontSize: '0.65rem'}}><i className="bi bi-pause-fill"></i> PAUSED</Badge>}
+                        {client.is_inactive && <Badge bg="secondary" className="shadow-sm" style={{fontSize: '0.65rem'}} title={client.inactive_reason || undefined}><i className="bi bi-slash-circle-fill"></i> INACTIVE</Badge>}
                         {client.is_paid && client.hasDocIssue && !client.date_completed && (
                           <Badge bg="warning" text="dark" className="shadow-sm" style={{fontSize: '0.65rem'}} title="AI check flagged a document (license, SSN card, or POA) as expired, invalid, or needing review">
                             <i className="bi bi-file-earmark-excel-fill"></i> DOC ISSUE
@@ -519,6 +561,11 @@ export default function AdminClientList() {
                                 <i className="bi bi-calendar-event"></i>
                               </button>
                           </>
+                        )}
+                        {hasPermission("edit_client") && (
+                          <button className={`btn btn-sm shadow-sm hover-lift ${client.is_inactive ? "btn-secondary text-white border-secondary" : "btn-dark border-secondary text-secondary"}`} onClick={() => handleToggleInactive(client.id)} title={client.is_inactive ? "Reactivate client" : "Mark inactive"}>
+                            <i className={`bi bi-${client.is_inactive ? 'arrow-counterclockwise' : 'slash-circle'}`}></i>
+                          </button>
                         )}
                         <button className="btn btn-sm btn-dark border-secondary text-light shadow-sm hover-lift" onClick={() => handleOpenSummary(client)} title="View Summary">
                           <i className="bi bi-card-list"></i>

@@ -7,6 +7,7 @@ import { useConfirm } from "../components/shared/ui/ConfirmDialog";
 import { resolveServiceId } from "../utils/services";
 import { allBureausResolved } from "../utils/inquiryCounts";
 import { fetchNextStepSignals, getNextStepTag } from "../utils/nextStepTag";
+import { fetchAllRows } from "../utils/fetchAllRows";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -194,17 +195,31 @@ export default function useAdminClients() {
             exp_na, tu_na, eq_na, exp_completed, tu_completed, eq_completed,
             admin_id, company_id, agent, progress,
             is_paused, paused_at, paused_days_total,
+            is_inactive, inactive_reason, inactivated_at,
             processing_duration,
             processing_stage, processing_stage_updated_at,
             company_tasks ( id, is_completed )
       `;
 
+      // Paginated fetch (see utils/fetchAllRows.js) rather than a single
+      // .range(0, 99999) call — a bare .range() only requests that many
+      // rows, it doesn't override a Supabase project's own API "Max Rows"
+      // setting (Settings -> API), which silently caps every request at
+      // that number regardless of what range was asked for. With more
+      // clients than that cap, this list was quietly dropping everyone
+      // past it — sorted newest-first, so a client whose created_at fell
+      // outside the first page (e.g. an old New Leads entry just marked
+      // paid today) would never appear here despite existing in the DB
+      // and showing up correctly everywhere else (e.g. the Financial
+      // Dashboard, which reads straight from incomes). DocumentRouting.jsx
+      // and utils/clientsData.js have this same latent bug on their own
+      // separate clients fetches and haven't been fixed yet either.
       let selectedFields = `${baseFields}, dispute_round, service_id`;
-      let { data: baseRows, error: baseErr } = await supabase
-        .from("clients")
-        .select(selectedFields)
-        .order("created_at", { ascending: false })
-        .range(0, 99999);
+      let { data: baseRows, error: baseErr } = await fetchAllRows("clients", {
+        select: selectedFields,
+        order: "created_at",
+        ascending: false,
+      });
 
       // sql/add_dispute_round.sql and/or sql/add_services.sql (and now
       // sql/add_processing_stage.sql) may not have been run yet on this
@@ -220,6 +235,9 @@ export default function useAdminClients() {
         // the Postgres error message first.
         ["processing_stage", "sql/add_processing_stage.sql"],
         ["processing_stage_updated_at", "sql/add_processing_stage.sql"],
+        ["is_inactive", "sql/add_inactive_status.sql"],
+        ["inactive_reason", "sql/add_inactive_status.sql"],
+        ["inactivated_at", "sql/add_inactive_status.sql"],
       ]) {
         if (baseErr && selectedFields.includes(col) && new RegExp(col, "i").test(baseErr.message || "")) {
           console.warn(`clients.${col} not found (run ${sqlFile}) — falling back without it.`);
@@ -228,11 +246,11 @@ export default function useAdminClients() {
             .map((f) => f.trim())
             .filter((f) => f !== col)
             .join(", ");
-          ({ data: baseRows, error: baseErr } = await supabase
-            .from("clients")
-            .select(selectedFields)
-            .order("created_at", { ascending: false })
-            .range(0, 99999));
+          ({ data: baseRows, error: baseErr } = await fetchAllRows("clients", {
+            select: selectedFields,
+            order: "created_at",
+            ascending: false,
+          }));
         }
       }
 
@@ -372,6 +390,65 @@ export default function useAdminClients() {
 
   }, [holidaySet, confirm]);
 
+  // Inactive/Reactivate Handler — same shape as handleTogglePause above,
+  // just a separate flag (is_inactive/inactive_reason/inactivated_at, see
+  // sql/add_inactive_status.sql) so a client can be independently paused
+  // AND inactive without the two states overwriting each other. This is
+  // the list-row equivalent of ClientHeader.jsx's Status-dropdown action
+  // (useClientActions.js#toggleInactive).
+  const handleToggleInactive = useCallback(async (clientId) => {
+    if (!clientId) return;
+    let target = null;
+    setAllClients((prev) => {
+      const found = prev.find((c) => c.id === clientId);
+      if (found) target = found;
+      return prev;
+    });
+
+    if (!target) return;
+
+    const isDeactivating = !target.is_inactive;
+
+    let reason = null;
+    if (isDeactivating) {
+      reason = await confirm({
+        title: "Mark Inactive",
+        message: `Mark ${target.full_name || "this client"} as inactive? They'll be pulled out of the main client tabs into a dedicated Inactive tab until reactivated.`,
+        confirmText: "Mark Inactive",
+        variant: "danger",
+        requireReason: true,
+        reasonLabel: "Reason for marking inactive",
+        reasonPlaceholder: "e.g. Cancelled, unresponsive for 60+ days",
+      });
+      if (!reason) return;
+    } else {
+      const confirmed = await confirm({
+        title: "Reactivate Client",
+        message: `Reactivate ${target.full_name || "this client"}? They'll return to the normal client tabs.`,
+        confirmText: "Reactivate",
+        variant: "success",
+      });
+      if (!confirmed) return;
+    }
+
+    const updateData = isDeactivating
+      ? { is_inactive: true, inactivated_at: new Date().toISOString(), inactive_reason: reason }
+      : { is_inactive: false, inactivated_at: null };
+
+    const { error: upErr } = await supabase.from('clients').update(updateData).eq('id', clientId);
+    if (upErr) {
+      console.error('[useAdminClients] toggle inactive error', upErr);
+      addToast({ title: "Update Failed", message: 'Failed to update status: ' + upErr.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+      return;
+    }
+
+    setAllClients((prev) => prev.map((c) =>
+      c.id === clientId
+        ? { ...c, is_inactive: isDeactivating, inactivated_at: updateData.inactivated_at, inactive_reason: isDeactivating ? reason : c.inactive_reason }
+        : c
+    ));
+  }, [confirm]);
+
   // Sets the manually-selected processing stage (see utils/processingStage.js)
   // straight from the client list row — same optimistic-update/error-toast
   // shape as handleTogglePause above, no confirmation needed since this is a
@@ -487,7 +564,17 @@ export default function useAdminClients() {
 
     const groups = singles;
     for (const [email, rows] of byEmail.entries()) {
-      rows.sort((a, b) => (a.dispute_round || 1) - (b.dispute_round || 1));
+      // Sorted by created_at, not dispute_round — dispute_round is
+      // unreliable as a sort key on legacy data (several genuinely
+      // different rounds can share the same stored value, e.g. several
+      // rows all stuck at 1; see ClientHeader.jsx's RoundSwitcher and
+      // clientDuplicateRound.js's getNextRoundForEmail for the same root
+      // cause). Every consumer below treats `rounds[rounds.length - 1]`
+      // as "the current/latest round" (tab filters, sort, badges, next
+      // step tag, the round dropdown in this file and in
+      // ClientHeader.jsx) — created_at is the one field that's always
+      // trustworthy for "which round actually came last."
+      rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       groups.push({ key: `email:${email}`, rounds: rows });
     }
 
@@ -519,6 +606,21 @@ export default function useAdminClients() {
       // wasn't reading them the same way, so clicking "Paid" showed every
       // paid client including ones long since completed, with no way to
       // see just the still-active ones.
+      // Inactive clients (sql/add_inactive_status.sql) are pulled out of
+      // every other tab into their own dedicated "Inactive" tab — once a
+      // client is inactive, none of the other tabs' definitions ("still
+      // owed a payment", "still being actively worked", "wrapped up")
+      // describe them anymore, same reasoning as Completed being split
+      // out of Paid/Unpaid below. Unlike Paused (is_paused), which stays
+      // visible in its normal tab just badged, Inactive is a bigger
+      // "stopped engaging entirely" state that shouldn't clutter the
+      // working views.
+      if (activeTab === "inactive") {
+        if (!c.is_inactive) return false;
+      } else if (c.is_inactive) {
+        return false;
+      }
+
       if (activeTab === "paid" && (!c.is_paid || c.all_completed)) return false;
       if (activeTab === "unpaid" && (c.is_paid || c.all_completed)) return false;
       if (activeTab === "completed" && !c.all_completed) return false;
@@ -536,7 +638,19 @@ export default function useAdminClients() {
       // or not this row's service_id has been backfilled yet.
       if (serviceFilter !== "all" && resolveServiceId(c) !== serviceFilter) return false;
 
-      if (s && !String(c.full_name || "").toLowerCase().includes(s)) return false;
+      // Matched against EVERY round in the group, not just the
+      // representative `c` (latest round) every other filter above uses.
+      // A name search is "find this person," and a person's most recent
+      // round can easily have different/wrong data from an earlier round
+      // that's actually the one someone's looking for — e.g. a stray test
+      // round (full_name "TEST") sharing a real client's email would
+      // otherwise make that client's ACTUAL round invisible to search
+      // entirely, since `c.full_name` would only ever be "TEST" for the
+      // whole group. Every other filter here (tab/task/service/dates/
+      // company/agent/aging) intentionally stays scoped to the current
+      // round — those describe the client's CURRENT status, which is a
+      // different question from "does this person exist in the list."
+      if (s && !group.rounds.some((r) => String(r.full_name || "").toLowerCase().includes(s))) return false;
 
       if (fromStr || toStr) {
         const clientDateStr = new Date(c.created_at).toLocaleDateString("en-CA");
@@ -637,6 +751,7 @@ export default function useAdminClients() {
     handleDeleteClient, 
     resetFilters, reload,
     handleTogglePause,
+    handleToggleInactive,
     handleSetProcessingStage,
     handleSetPaidDays,
     handleSetPaidAt,

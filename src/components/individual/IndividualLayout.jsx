@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext'; 
 import { supabase } from "../../supabaseClient";
-import { Spinner, Navbar, Offcanvas, Button, Ratio } from "react-bootstrap";
+import { Spinner, Navbar, Offcanvas, Button, Ratio, Alert } from "react-bootstrap";
 import { useClient } from "../../hooks/useClient";
 import { useClientCreditFiles } from "../../hooks/useClientCreditFiles";
 import { deriveServiceId } from "../../utils/services";
@@ -25,7 +25,6 @@ import VisionBoardView from './sidebars/VisionBoardView';
 
 // 👇 NEW: Import the Bell Component 👇
 import ClientNotificationBell from './ClientNotificationBell';
-import SubscriptionLocked from '../shared/access/SubscriptionLocked';
 import SupportChatLauncher from '../shared/support/SupportChatLauncher';
 
 import step1 from "../../assets/videos/step1.mp4";
@@ -360,39 +359,16 @@ export default function IndividualLayout() {
     );
   }
 
-  // Full lock: replaces the old "Preview Mode" banner (which let unpaid
-  // clients browse everything) with a hard block. Reuses the existing
-  // Request Admin Help flow (notification + webhook, defined above) instead
-  // of duplicating it, so there's still a path to activation from here.
-  // "Upload Payment Receipt" reuses UniversalPaymentModal (already handles
-  // Zelle screenshot upload -> payment_verifications) with the
-  // 'account_activation' service type, so the client can self-serve a
-  // receipt instead of only being able to ask an admin to do it manually.
-  if (!isActivated) {
-    return (
-      <>
-        <SubscriptionLocked
-          title="Account Not Activated"
-          message="Your portal access is currently on hold. Upload a payment receipt or request admin help to get your account activated and start your dispute process."
-          actionLabel="Upload Payment Receipt"
-          onAction={() => {
-            setSelectedService('account_activation');
-            setShowPaymentModal(true);
-          }}
-          secondaryActionLabel={helpRequested ? "Admin Notified" : "Request Admin Help"}
-          onSecondaryAction={helpRequested ? undefined : handleRequestAdminHelp}
-          onLogout={() => signOut().then(() => navigate('/login'))}
-        />
-        <UniversalPaymentModal
-          show={showPaymentModal}
-          onHide={() => setShowPaymentModal(false)}
-          serviceType={selectedService}
-          clientId={clientId}
-        />
-      </>
-    );
-  }
-
+  // Unpaid clients used to hit a full-page hard block here instead of the
+  // portal — reverted back to letting them in on trial mode (isActivated
+  // === client.is_paid, threaded through as isPreviewMode below): Sidebar
+  // only allows dashboard/profile/configurator while in preview
+  // (Sidebar.jsx's allowedInPreview) and ProfileDashboard blurs/locks the
+  // dispute data itself, so there's still a real gate — it's just not a
+  // dead end. The "Upload Payment Receipt"/"Request Admin Help" actions
+  // that used to live on the full-page block now show as a banner inside
+  // the portal instead (see the Alert right below), so that self-serve
+  // path isn't lost, just relocated.
   return (
     <div className="d-flex bg-transparent position-relative" style={{ minHeight: "100vh" }}> 
       
@@ -505,6 +481,43 @@ export default function IndividualLayout() {
                 </Button>
              </div>
           </div>
+
+          {/* Trial-mode activation banner — same "Upload Payment Receipt" /
+              "Request Admin Help" actions the old full-page block offered,
+              just as a dismiss-free banner instead of blocking the whole
+              portal. Stays visible on every tab (rendered above
+              renderContent()) since Sidebar.jsx's allowedInPreview still
+              only lets a trial client reach dashboard/profile/configurator
+              — this is their reminder + path off that trial mode from
+              wherever they land. */}
+          {!isActivated && (
+            <Alert variant="warning" className="d-flex flex-wrap align-items-center justify-content-between gap-2 shadow-sm mb-4">
+              <div className="me-2">
+                <i className="bi bi-hourglass-split me-2"></i>
+                <strong>Trial mode</strong> — your portal access is on hold until an admin activates your account. Upload a payment receipt or request admin help to unlock full access.
+              </div>
+              <div className="d-flex gap-2 flex-shrink-0">
+                <Button
+                  size="sm"
+                  variant="dark"
+                  className="fw-bold"
+                  onClick={() => { setSelectedService('account_activation'); setShowPaymentModal(true); }}
+                >
+                  <i className="bi bi-receipt me-1"></i> Upload Payment Receipt
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline-dark"
+                  className="fw-bold"
+                  onClick={helpRequested ? undefined : handleRequestAdminHelp}
+                  disabled={helpRequested}
+                >
+                  <i className={`bi ${helpRequested ? "bi-check-circle-fill" : "bi-headset"} me-1`}></i>
+                  {helpRequested ? "Admin Notified" : "Request Admin Help"}
+                </Button>
+              </div>
+            </Alert>
+          )}
 
           {renderContent()}
         </main>

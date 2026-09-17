@@ -154,9 +154,9 @@ function RoundSwitcher({ clientId, email, currentRound }) {
     (async () => {
       const { data } = await supabase
         .from("clients")
-        .select("id, dispute_round")
+        .select("id, dispute_round, created_at")
         .ilike("email", email.trim().toLowerCase())
-        .order("dispute_round", { ascending: true });
+        .order("created_at", { ascending: true });
       if (active) setRounds(data || []);
     })();
     return () => { active = false; };
@@ -180,9 +180,18 @@ function RoundSwitcher({ clientId, email, currentRound }) {
         if (e.target.value !== clientId) navigate(`/clients/${e.target.value}`);
       }}
     >
-      {rounds.map((r) => (
+      {rounds.map((r, idx) => (
         <option key={r.id} value={r.id}>
-          Round {r.dispute_round || 1}{r.id === clientId ? " (current)" : ""}
+          {/* Labeled by chronological position (idx+1), not the stored
+              dispute_round. Rows created before startNewRound computed its
+              next-round number off the MAX across all of a client's rows
+              (see clientDuplicateRound.js's getNextRoundForEmail) can share
+              the same dispute_round value — several genuinely different
+              rounds all stuck at 1 — which made this dropdown show
+              indistinguishable "Round 1" entries. Position-in-history is
+              always unique and always matches the true chronological order,
+              regardless of what's stored in dispute_round for older rows. */}
+          Round {idx + 1}{r.id === clientId ? " (current)" : ""}
         </option>
       ))}
     </Form.Select>
@@ -561,6 +570,11 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                 <Badge bg={client.is_paid ? "success" : "danger"} className="ms-3">{client.is_paid ? "Paid" : "Unpaid"}</Badge>
                 <RoundSwitcher clientId={clientId} email={client.email} currentRound={client.dispute_round} />
                 {client.is_paused && <Badge bg="warning" text="dark" className="ms-2 shadow-sm"><i className="bi bi-pause-fill me-1" />PAUSED</Badge>}
+                {client.is_inactive && (
+                  <Badge bg="secondary" className="ms-2 shadow-sm" title={client.inactive_reason || undefined}>
+                    <i className="bi bi-slash-circle-fill me-1" />INACTIVE
+                  </Badge>
+                )}
                 {/* date_completed is set once, automatically, by the
                     update_client_completion_status DB trigger the moment
                     all 3 bureaus first read done/N-A (not by any button —
@@ -767,6 +781,15 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                               NOT undo (Document Routing round, auto-recorded
                               income, and the payment webhooks all stay). */}
                           {client.is_paid && <Dropdown.Item onClick={actions.markAsUnpaid} className="text-danger py-2"><i className="bi bi-arrow-counterclockwise me-2" />Mark Unpaid (Undo)</Dropdown.Item>}
+                          {/* Separate from Pause above — Pause is a
+                              temporary hold expected to resume; Inactive is
+                              for a client who's stopped engaging entirely
+                              and gets pulled into its own dedicated tab on
+                              the Client List (see useAdminClients.js). */}
+                          <Dropdown.Item onClick={actions.toggleInactive} className={`${client.is_inactive ? "text-success" : "text-secondary"} py-2`}>
+                            <i className={`bi ${client.is_inactive ? "bi-arrow-counterclockwise" : "bi-slash-circle"} me-2`} />
+                            {client.is_inactive ? "Reactivate Client" : "Mark Inactive"}
+                          </Dropdown.Item>
                           {/* Manually-selected processing stage (see
                               utils/processingStage.js) — where a file
                               actually sits in the dispute cycle, so

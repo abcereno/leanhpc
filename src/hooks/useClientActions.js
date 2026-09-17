@@ -4,7 +4,7 @@ import { useToast } from "../components/shared/ui/ToastNotifier";
 import { useConfirm } from "../components/shared/ui/ConfirmDialog";
 import { markClientPaid } from "../utils/markClientPaid";
 import { computeWeightedProgress } from "../utils/progressWeighting";
-import { insertClientRecord, copyIdentityDocuments } from "../utils/clientDuplicateRound";
+import { insertClientRecord, copyIdentityDocuments, getNextRoundForEmail } from "../utils/clientDuplicateRound";
 
 export function useClientActions(clientId, client, refetch, onRefresh) {
   const { addToast } = useToast();
@@ -115,6 +115,49 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
     if (e) { err(`Failed to update pause status: ${e.message}`); return; }
     await reload();
     ok(`Service ${isPausing ? "paused" : "resumed"}.`);
+  };
+
+  // Inactive is a separate flag from Pause (is_paused/pause_reason above)
+  // — Pause is a temporary hold expected to resume ("waiting on
+  // documents"), so paused clients stay visible in their normal tabs,
+  // just badged. Inactive is for a client who's stopped engaging
+  // entirely (cancelled, gone dark, etc.) and gets pulled OUT of the
+  // normal working tabs into its own dedicated Inactive tab (see
+  // useAdminClients.js's filteredClientList) instead of staying mixed
+  // in. Same required-reason UX as togglePause via ConfirmDialog.jsx.
+  const toggleInactive = async () => {
+    const isDeactivating = !client.is_inactive;
+
+    let reason = null;
+    if (isDeactivating) {
+      reason = await confirm({
+        title: "Mark Inactive",
+        message: `Mark ${client.full_name || "this client"} as inactive? They'll be pulled out of the main client tabs into a dedicated Inactive tab until reactivated.`,
+        confirmText: "Mark Inactive",
+        variant: "danger",
+        requireReason: true,
+        reasonLabel: "Reason for marking inactive",
+        reasonPlaceholder: "e.g. Cancelled, unresponsive for 60+ days",
+      });
+      if (!reason) return;
+    } else {
+      const confirmed = await confirm({
+        title: "Reactivate Client",
+        message: `Reactivate ${client.full_name || "this client"}? They'll return to the normal client tabs.`,
+        confirmText: "Reactivate",
+        variant: "success",
+      });
+      if (!confirmed) return;
+    }
+
+    const data = isDeactivating
+      ? { is_inactive: true, inactivated_at: new Date().toISOString(), inactive_reason: reason }
+      : { is_inactive: false, inactivated_at: null };
+
+    const { error: e } = await supabase.from("clients").update(data).eq("id", clientId);
+    if (e) { err(`Failed to update status: ${e.message}`); return; }
+    await reload();
+    ok(`Client marked ${isDeactivating ? "inactive" : "active"}.`);
   };
 
   const toggleDispute = async () => {
@@ -239,7 +282,14 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
   // success (so the caller can navigate there), or null if canceled/
   // failed.
   const startNewRound = async () => {
-    const nextRound = (client.dispute_round || 1) + 1;
+    // getNextRoundForEmail looks at every clients row sharing this email
+    // and takes MAX(dispute_round) + 1 — not `(client.dispute_round || 1)
+    // + 1` off of whichever row happens to be open. Starting a new round
+    // from an older row (its own dispute_round can be stale/wrong on
+    // legacy data) used to propose a round number that already existed
+    // elsewhere for this client, which is how some clients ended up with
+    // several rows all sharing the same dispute_round.
+    const nextRound = await getNextRoundForEmail(client.email);
     const confirmed = await confirm({
       title: "Start New Round",
       message: `Create Round ${nextRound} for ${client.full_name || "this client"}? This copies their personal info (name, SSN, contact, address) and identity documents (ID, proof of address, authorization) into a brand-new client record. It will NOT carry over the credit report, inquiry counts, payment status, or progress — the new round starts completely fresh, same as a new client.`,
@@ -287,7 +337,7 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
   };
 
   return {
-    markAsPaid, markAsUnpaid, togglePause, toggleDispute, toggleInquiriesLock,
+    markAsPaid, markAsUnpaid, togglePause, toggleInactive, toggleDispute, toggleInquiriesLock,
     updateStartDateToToday,
     markBureauComplete, markBureauNA,
     markServiceComplete,

@@ -6,6 +6,7 @@ import { useToast } from "../shared/ui/ToastNotifier";
 import { useConfirm } from "../shared/ui/ConfirmDialog";
 import { resolveServiceId, SERVICES } from "../../utils/services";
 import { recomputeProgressFromDocsOrCalls } from "../../utils/progressWeighting";
+import { fetchAllRows } from "../../utils/fetchAllRows";
 import LogDocumentModal from "./client-profile/modals/LogDocumentModal";
 import LogChecklistItemModal from "./client-profile/modals/LogChecklistItemModal";
 
@@ -179,26 +180,41 @@ export default function DocumentRouting() {
 
       const [adminRes, clientRes, callRes, docRes, allDocsRes] = await Promise.all([
           supabase.from('profiles').select('id, full_name').order('full_name'),
-          // .range(0, 99999) — without it, Supabase's default 1000-row cap
-          // silently truncates this list once the client count passes 1000.
-          // Any client sorted (alphabetically, by full_name) past that
-          // cutoff then fails the lookup below and renders as "Unknown
-          // Client" even though the client record is completely fine —
-          // clicking through still resolves the real name because that
-          // link fetches the client by id directly, bypassing this list
-          // entirely. Same fix already applied to the exact same cap in
-          // useAdminClients.js. If "Unknown Client" rows still show up
-          // despite this .range() (e.g. a Supabase project-level API "Max
-          // Rows" setting capping every request regardless of the range
-          // requested), the backfill query below catches it as a second
-          // layer — see its own comment.
-          supabase.from('clients').select('id, full_name, is_paid, is_paused, exp_completed, tu_completed, eq_completed, admin_id, dispute_method, service_id').order('full_name', { ascending: true }).range(0, 99999),
-          supabase.from('call_routing').select('client_id, bureau').eq('status', 'PENDING').range(0, 99999),
-          // Same 1000-row cap risk as the clients query above, but worse
-          // here — a truncated result wouldn't just mislabel a name, it
-          // would drop the routing row (task) entirely from the queue.
-          supabase.from('document_routing').select('*, profiles:assigned_admin_id (full_name)').eq('status', 'PENDING').range(0, 99999),
-          supabase.from('document_routing').select('client_id, round_count').range(0, 99999)
+          // Paginated fetch (see utils/fetchAllRows.js) rather than a bare
+          // .range(0, 99999) — a plain .range() only requests that many
+          // rows, it doesn't override a Supabase project-level API "Max
+          // Rows" setting (Settings -> API), which silently caps every
+          // request at that number regardless of the range requested. Any
+          // client sorted (alphabetically, by full_name) past that cutoff
+          // then fails the lookup below and renders as "Unknown Client"
+          // even though the client record is completely fine — clicking
+          // through still resolves the real name because that link
+          // fetches the client by id directly, bypassing this list
+          // entirely. Same fix already applied to the same cap in
+          // useAdminClients.js. The backfill query below stays in place as
+          // a second layer in case some other edge case still slips a
+          // referenced client past this.
+          fetchAllRows('clients', {
+            select: 'id, full_name, is_paid, is_paused, exp_completed, tu_completed, eq_completed, admin_id, dispute_method, service_id',
+            order: 'full_name',
+            ascending: true,
+          }),
+          // Same cap risk — a truncated result here silently drops a
+          // client's active call-routing entry, which feeds
+          // hasBlockingCallQueueEntry below (wrongly letting Send through
+          // for a client who actually has a pending TU/EQ call).
+          fetchAllRows('call_routing', {
+            select: 'client_id, bureau',
+            filter: (q) => q.eq('status', 'PENDING'),
+          }),
+          // Same cap risk as the clients query above, but worse here — a
+          // truncated result wouldn't just mislabel a name, it would drop
+          // the routing row (task) entirely from the queue.
+          fetchAllRows('document_routing', {
+            select: '*, profiles:assigned_admin_id (full_name)',
+            filter: (q) => q.eq('status', 'PENDING'),
+          }),
+          fetchAllRows('document_routing', { select: 'client_id, round_count' }),
       ]);
 
       if (adminRes.data) setAdmins(adminRes.data);
@@ -226,12 +242,10 @@ export default function DocumentRouting() {
         activeCalls.some((call) => call.client_id === clientId && call.bureau !== 'exp');
 
       // Belt-and-suspenders backfill: the bulk clients fetch above already
-      // carries .range(0, 99999) specifically to dodge PostgREST's default
-      // 1000-row cap, but if a client referenced by a pending doc task is
-      // STILL missing from it for any other reason (e.g. a project-level
-      // API "Max Rows" setting in Supabase capping every request
-      // regardless of the range requested, or some other edge case), a
-      // single-row-by-id lookup always works — that's exactly why clicking
+      // pages through fetchAllRows specifically to dodge Supabase's Max
+      // Rows cap, but if a client referenced by a pending doc task is
+      // STILL missing from it for any other reason (some other edge case),
+      // a single-row-by-id lookup always works — that's exactly why clicking
       // through to a client's profile always resolves the real name even
       // when this list shows "Unknown Client" for the same row. Rather
       // than leave that mismatch standing, resolve it here too instead of

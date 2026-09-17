@@ -16,6 +16,7 @@ import { supabase } from "../supabaseClient";
 import { getHolidays, calculateBusinessDays, calculatePaidRunningDays } from "./dateHelpers";
 import { clientHasAuthorizationHold } from "./authorizationHold";
 import { computeWorkflowStage } from "./workflowStage";
+import { fetchAllRows } from "./fetchAllRows";
 
 // Fleet-wide `.in("client_id", clientIds)` queries below can easily carry
 // 1,000+ UUIDs once the client list grows — encoded into a GET query string
@@ -155,21 +156,30 @@ export async function fetchEnrichedClients() {
     .order("company_name");
   if (companiesErr) throw companiesErr;
 
+  // Paginated fetch (see utils/fetchAllRows.js) rather than a bare
+  // .range(0, 99999) — a plain .range() only requests that many rows, it
+  // doesn't override a Supabase project-level API "Max Rows" setting
+  // (Settings -> API), which silently caps every request at that number
+  // regardless of the range requested. Sorted newest-first, so any client
+  // whose created_at fell outside the first page would quietly vanish
+  // from the Ops Dashboard while still existing fine everywhere else —
+  // same bug already fixed on the exact same query shape in
+  // useAdminClients.js and DocumentRouting.jsx.
   let selectedFields = CLIENT_SUMMARY_SELECT;
-  let { data: baseRows, error: baseErr } = await supabase
-    .from("clients")
-    .select(selectedFields)
-    .order("created_at", { ascending: false })
-    .range(0, 99999);
+  let { data: baseRows, error: baseErr } = await fetchAllRows("clients", {
+    select: selectedFields,
+    order: "created_at",
+    ascending: false,
+  });
 
   if (baseErr && /approved_(exp|tu|eq)_count/i.test(baseErr.message || "")) {
     console.warn("clients.approved_*_count not found (run sql/phase0_persisted_counts.sql) — falling back without it.");
     selectedFields = CLIENT_SUMMARY_SELECT_FALLBACK;
-    ({ data: baseRows, error: baseErr } = await supabase
-      .from("clients")
-      .select(selectedFields)
-      .order("created_at", { ascending: false })
-      .range(0, 99999));
+    ({ data: baseRows, error: baseErr } = await fetchAllRows("clients", {
+      select: selectedFields,
+      order: "created_at",
+      ascending: false,
+    }));
   }
 
   // sql/add_services.sql may not have been run yet either — same
@@ -178,11 +188,11 @@ export async function fetchEnrichedClients() {
   if (baseErr && /service_id/i.test(baseErr.message || "")) {
     console.warn("clients.service_id not found (run sql/add_services.sql) — falling back without it.");
     selectedFields = selectedFields.replace(/service_id,\s*/, "");
-    ({ data: baseRows, error: baseErr } = await supabase
-      .from("clients")
-      .select(selectedFields)
-      .order("created_at", { ascending: false })
-      .range(0, 99999));
+    ({ data: baseRows, error: baseErr } = await fetchAllRows("clients", {
+      select: selectedFields,
+      order: "created_at",
+      ascending: false,
+    }));
   }
 
   // sql/add_last_report_update.sql may not have been run yet either — same
@@ -192,11 +202,11 @@ export async function fetchEnrichedClients() {
   if (baseErr && /last_report_update_at/i.test(baseErr.message || "")) {
     console.warn("clients.last_report_update_at not found (run sql/add_last_report_update.sql) — falling back without it.");
     selectedFields = selectedFields.replace(/last_report_update_at,\s*/, "");
-    ({ data: baseRows, error: baseErr } = await supabase
-      .from("clients")
-      .select(selectedFields)
-      .order("created_at", { ascending: false })
-      .range(0, 99999));
+    ({ data: baseRows, error: baseErr } = await fetchAllRows("clients", {
+      select: selectedFields,
+      order: "created_at",
+      ascending: false,
+    }));
   }
 
   // sql/add_processing_stage.sql may not have been run yet either — same
@@ -205,11 +215,11 @@ export async function fetchEnrichedClients() {
   if (baseErr && /processing_stage/i.test(baseErr.message || "")) {
     console.warn("clients.processing_stage not found (run sql/add_processing_stage.sql) — falling back without it.");
     selectedFields = selectedFields.replace(/processing_stage, processing_stage_updated_at,\s*/, "");
-    ({ data: baseRows, error: baseErr } = await supabase
-      .from("clients")
-      .select(selectedFields)
-      .order("created_at", { ascending: false })
-      .range(0, 99999));
+    ({ data: baseRows, error: baseErr } = await fetchAllRows("clients", {
+      select: selectedFields,
+      order: "created_at",
+      ascending: false,
+    }));
   }
 
   if (baseErr) throw baseErr;

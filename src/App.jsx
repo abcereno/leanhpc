@@ -63,6 +63,7 @@ import ClientAuditPage from "./components/shared/client-pages/ClientAuditPage";
 import ClientProgressPage from "./components/shared/client-pages/ClientProgressPage";
 import DebugRawReportPage from "./components/admin/DebugRawReportPage";
 import ClientDocumentDashboard from "./components/admin/customer-service/ClientDocumentsDashboard";
+import CsDashboard2 from "./components/admin/customer-service/CsDashboard2";
 
 // Admin Specific
 import DocumentRouting from "./components/admin/DocumentRouting";
@@ -202,6 +203,10 @@ function AppRoutes() {
             utils/permissions.js. Previously a hard-coded role allowlist. */}
         <Route element={<PermissionGuard permissions={['view_documents', 'upload_documents', 'approve_documents', 'reject_documents', 'generate_cfpb_package', 'generate_postalocity_package', 'download_documents']} />}>
             <Route path="/cs-dashboard" element={<ClientDocumentDashboard />} />
+            {/* Preview build of the revamped CS dashboard (see CsDashboard2.jsx
+                header comment) — separate route, same access gate as the live
+                one, so it can be reviewed without touching /cs-dashboard. */}
+            <Route path="/cs-dashboard2" element={<CsDashboard2 />} />
         </Route>
 
         {/* === INTERNAL STAFF: ADMIN / DEVELOPER PORTAL === */}

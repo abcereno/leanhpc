@@ -40,6 +40,41 @@ export async function findClientRoundsByEmail(email) {
 }
 
 /**
+ * Highest dispute_round among a set of same-email client rows, or 0 if
+ * none. Pure helper shared by resolveRoundForNewClient and
+ * getNextRoundForEmail below — see the latter's comment for why this has
+ * to be a MAX() over every row instead of trusting sort order.
+ */
+function highestRound(rows) {
+  return rows.reduce((max, r) => Math.max(max, Number(r.dispute_round) || 0), 0);
+}
+
+/**
+ * The dispute_round to assign to this email's NEXT round: one past the
+ * highest dispute_round on file for it (1 if this is a brand-new email).
+ * Single source of truth for "what round number comes next" — used by
+ * resolveRoundForNewClient below (the 6 add-client forms) AND by
+ * useClientActions.js's startNewRound (the "Start New Round" button on an
+ * existing client's own profile), so there's exactly one place deciding
+ * this instead of two independent guesses that can disagree.
+ *
+ * Deliberately MAX() across every matching row, not "whichever row is
+ * currently open" or "the first result after ORDER BY dispute_round" —
+ * ties (multiple rows sharing the same dispute_round, which legacy data
+ * predating this rule has plenty of) make both of those pick an arbitrary
+ * existing round instead of the true highest one. That's exactly how a
+ * client ended up with several rows all labeled "Round 1": startNewRound
+ * used to compute `(client.dispute_round || 1) + 1` off of whichever row
+ * happened to be open, so starting a new round from an old, stale
+ * dispute_round=1 row proposed "Round 2" even when a real Round 2 (or
+ * higher) already existed elsewhere for that email.
+ */
+export async function getNextRoundForEmail(email) {
+  const existing = await findClientRoundsByEmail(email);
+  return highestRound(existing) + 1;
+}
+
+/**
  * Call this before inserting a new client row. If the email already
  * belongs to an existing client, warns the admin (name + current round)
  * and asks for confirmation before proceeding — the "warn, then confirm"
@@ -62,7 +97,7 @@ export async function resolveRoundForNewClient(email, confirmFn = window.confirm
   if (existing.length === 0) return 1;
 
   const latest = existing[0];
-  const currentRound = latest.dispute_round || 1;
+  const currentRound = highestRound(existing);
   const nextRound = currentRound + 1;
 
   const message =
