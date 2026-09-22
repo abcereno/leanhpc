@@ -18,6 +18,12 @@ export default function SearchableSelect({
   required,
   defaultValue = "",
   disabled = false,
+  // Optional — lets a caller that isn't a plain <Form onSubmit> (e.g. a
+  // page driving its own React state, not a FormData submit) react to a
+  // selection immediately instead of reading the hidden input on submit.
+  // Purely additive: every existing form-based caller ignores this and
+  // keeps working off the hidden input exactly as before.
+  onChange,
 }) {
   const [query, setQuery] = useState("");
   const [selectedValue, setSelectedValue] = useState(defaultValue);
@@ -53,6 +59,7 @@ export default function SearchableSelect({
     setSelectedValue(opt.value);
     setQuery("");
     setOpen(false);
+    if (onChange) onChange(opt.value, opt);
   };
 
   return (

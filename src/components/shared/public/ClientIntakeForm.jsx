@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Form, Button, Spinner, Alert, Card, Container } from 'react-bootstrap';
+import { LTOS_COMPANY_ID } from '../../../utils/companies';
 
 export default function ClientIntakeForm() {
   const [formData, setFormData] = useState({ fullName: '', email: '', phone: '' });
@@ -22,8 +23,8 @@ export default function ClientIntakeForm() {
           fullName: formData.fullName,
           email: formData.email,
           phone: formData.phone,
-          // 👇 Hardcoded Company ID and Null Agent ID 👇
-          companyId: "e33ef166-d381-458e-a5c8-ac77557d5ea2",
+          // 👇 Company ID (LTOS) and Null Agent ID 👇
+          companyId: LTOS_COMPANY_ID,
           agentId: null,
         }),
       });

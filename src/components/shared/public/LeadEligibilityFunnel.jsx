@@ -4,6 +4,7 @@ import { supabase } from "../../../supabaseClient";
 import { calculateFundingEligibility } from "../../../utils/funderRules";
 import { parseSmartCredit } from "../../../utils/parseSmartCredit";
 import { deriveServiceId } from "../../../utils/services";
+import { LTOS_COMPANY_ID } from "../../../utils/companies";
 
 const BUCKET_NAME = "clients"; 
 
@@ -178,9 +179,9 @@ const standardizeData = (p) => {
     };
 };
 
-export default function LeadEligibilityFunnel({ 
-  companyId = "e33ef166-d381-458e-a5c8-ac77557d5ea2", 
-  affiliateLink = "https://www.smartcredit.com/?PID=23400" 
+export default function LeadEligibilityFunnel({
+  companyId = LTOS_COMPANY_ID,
+  affiliateLink = "https://www.smartcredit.com/?PID=23400"
 }) {
   const [step, setStep] = useState("lead_capture"); 
   const [errorMsg, setErrorMsg] = useState("");

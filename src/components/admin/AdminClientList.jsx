@@ -22,11 +22,13 @@ import FunderEligibilityModal from "../shared/ui/FunderEligibilityModal";
 import InquiryLoader from "../shared/ui/InquiryLoader";
 import BulkEditModal from "./client-profile/BulkEditModal";
 import ClientSummaryModal from "./client-profile/modals/ClientSummaryModal";
-import { SERVICES, serviceLabel } from "../../utils/services";
+import { SERVICES, serviceLabel, resolveServiceId } from "../../utils/services";
 import { PROCESSING_STAGES } from "../../utils/processingStage";
 import ClientProfile from "./ClientProfile";
 import { useToast } from "../shared/ui/ToastNotifier";
 import { fetchAllRows } from "../../utils/fetchAllRows";
+import { getCaseManagementCountdown, getPaymentDueStatus } from "../../utils/aging";
+import SetPaymentDueModal from "./client-profile/modals/SetPaymentDueModal";
 
 export default function AdminClientList() {
   const { addToast } = useToast();
@@ -61,6 +63,7 @@ export default function AdminClientList() {
     handleToggleInactive,
     handleSetProcessingStage,
     handleSetPaidAt,
+    handleSetNextPaymentDue,
     resetFilters,
   } = useAdminClients();
 
@@ -92,6 +95,11 @@ export default function AdminClientList() {
   const [showPaidModal, setShowPaidModal] = useState(false);
   const [paidModalClient, setPaidModalClient] = useState(null);
   const [paidModalDate, setPaidModalDate] = useState("");
+
+  // Payment Due Modal State — reuses the same SetPaymentDueModal component
+  // ClientHeader.jsx's Status dropdown opens, just triggered from a row
+  // action here instead of the client's own profile.
+  const [paymentDueModalClient, setPaymentDueModalClient] = useState(null);
 
   // Eligibility Modal State
   const [showEligibilityModal, setShowEligibilityModal] = useState(false);
@@ -464,6 +472,30 @@ export default function AdminClientList() {
                         {client.is_paid && <Badge bg="success" className="shadow-sm" style={{fontSize: '0.65rem'}}><i className="bi bi-currency-dollar"></i> PAID</Badge>}
                         {client.is_paused && <Badge bg="warning" text="dark" className="shadow-sm" style={{fontSize: '0.65rem'}}><i className="bi bi-pause-fill"></i> PAUSED</Badge>}
                         {client.is_inactive && <Badge bg="secondary" className="shadow-sm" style={{fontSize: '0.65rem'}} title={client.inactive_reason || undefined}><i className="bi bi-slash-circle-fill"></i> INACTIVE</Badge>}
+                        {(() => {
+                          // Case Management report re-import reminder — same
+                          // 30-day logic as ClientCardGrid.jsx's Ops
+                          // Pipeline card, just rendered here too so it's
+                          // visible without leaving the Client Management
+                          // list. See utils/aging.js#getCaseManagementCountdown.
+                          const isCM = resolveServiceId(client) === "credit_repair";
+                          const countdown = isCM && client.is_paid ? getCaseManagementCountdown(client) : null;
+                          if (!countdown) return null;
+                          return (
+                            <Badge bg={countdown.isOverdue ? "danger" : "info"} text={countdown.isOverdue ? undefined : "dark"} className="shadow-sm" style={{fontSize: '0.65rem'}} title={client.last_report_update_at ? "Case Management check-in countdown, from last report update" : "Case Management check-in countdown, from paid date (no report update yet)"}>
+                              <i className="bi bi-hourglass-split"></i> {countdown.isOverdue ? `IMPORT OVERDUE ${Math.abs(countdown.daysLeft)}d` : `IMPORT ${countdown.daysLeft}d`}
+                            </Badge>
+                          );
+                        })()}
+                        {(() => {
+                          const due = getPaymentDueStatus(client);
+                          if (!due) return null;
+                          return (
+                            <Badge bg={due.isOverdue ? "danger" : "info"} text={due.isOverdue ? undefined : "dark"} className="shadow-sm" style={{fontSize: '0.65rem'}} title={`Payment due ${new Date(client.next_payment_due_at + "T00:00:00").toLocaleDateString()}`}>
+                              <i className="bi bi-cash-coin"></i> {due.isOverdue ? `PAYMENT OVERDUE ${Math.abs(due.daysLeft)}d` : `PAYMENT DUE ${due.daysLeft}d`}
+                            </Badge>
+                          );
+                        })()}
                         {client.is_paid && client.hasDocIssue && !client.date_completed && (
                           <Badge bg="warning" text="dark" className="shadow-sm" style={{fontSize: '0.65rem'}} title="AI check flagged a document (license, SSN card, or POA) as expired, invalid, or needing review">
                             <i className="bi bi-file-earmark-excel-fill"></i> DOC ISSUE
@@ -561,6 +593,11 @@ export default function AdminClientList() {
                                 <i className="bi bi-calendar-event"></i>
                               </button>
                           </>
+                        )}
+                        {hasPermission("edit_client") && (
+                          <button className={`btn btn-sm shadow-sm hover-lift ${client.next_payment_due_at ? "btn-info text-dark border-info" : "btn-dark border-secondary text-info"}`} onClick={() => setPaymentDueModalClient(client)} title={client.next_payment_due_at ? "Update payment due date" : "Set payment due date"}>
+                            <i className="bi bi-cash-coin"></i>
+                          </button>
                         )}
                         {hasPermission("edit_client") && (
                           <button className={`btn btn-sm shadow-sm hover-lift ${client.is_inactive ? "btn-secondary text-white border-secondary" : "btn-dark border-secondary text-secondary"}`} onClick={() => handleToggleInactive(client.id)} title={client.is_inactive ? "Reactivate client" : "Mark inactive"}>
@@ -684,6 +721,14 @@ export default function AdminClientList() {
           <Button variant="primary" className="fw-bold px-3 shadow-sm" onClick={savePaidDate}>Save</Button>
         </Modal.Footer>
       </Modal>
+
+      <SetPaymentDueModal
+        show={!!paymentDueModalClient}
+        onClose={() => setPaymentDueModalClient(null)}
+        clientName={paymentDueModalClient?.full_name}
+        currentDate={paymentDueModalClient?.next_payment_due_at}
+        onConfirm={(dateOrNull) => handleSetNextPaymentDue(paymentDueModalClient.id, dateOrNull)}
+      />
     </div>
   );
 }

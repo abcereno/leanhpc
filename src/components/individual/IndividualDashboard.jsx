@@ -5,6 +5,7 @@ import IndividualClientProfile from "./sidebars/IndividualClientProfile";
 import ClientAuditPage from "../shared/client-pages/ClientAuditPage";
 import { useToast } from "../shared/ui/ToastNotifier";
 import { deriveServiceId } from "../../utils/services";
+import { LTOS_COMPANY_ID } from "../../utils/companies";
 
 export default function IndividualDashboard() {
   const { addToast } = useToast();
@@ -80,7 +81,17 @@ export default function IndividualDashboard() {
                 dispute_method: 'inquiry deletion',
                 service_id: deriveServiceId('inquiry deletion'),
                 status: 'active',
-                auth_user_id: authUser.id
+                auth_user_id: authUser.id,
+                // Every individual signup belongs to LTOS — same rule the
+                // public funding-eligibility widget's leads already follow
+                // (see EmbeddableEligibilityChecker.jsx). This is the
+                // client-side self-heal path (runs when handle_new_user's
+                // DB trigger somehow didn't already create the clients row
+                // — see sql/add_individual_signup_company.sql for the
+                // primary fix, in the trigger itself); mirrors it exactly
+                // so neither path can create an individual client without
+                // a company_id.
+                company_id: LTOS_COMPANY_ID,
             };
             let { data: newClient, error: createError } = await supabase
                 .from("clients")

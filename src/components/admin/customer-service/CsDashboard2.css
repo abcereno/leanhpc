@@ -431,6 +431,28 @@
   color: var(--csd2-purple-text);
 }
 
+/* company_leads.computed_status badges (Leads tab) — reuse the same
+   green/yellow/red vars the outcome badges above already define. */
+.csd2-badge.csd2-status-green {
+  background: var(--csd2-green-bg);
+  color: var(--csd2-green-text);
+}
+
+.csd2-badge.csd2-status-yellow {
+  background: var(--csd2-yellow-bg);
+  color: var(--csd2-yellow-text);
+}
+
+.csd2-badge.csd2-status-red {
+  background: var(--csd2-red-bg);
+  color: var(--csd2-red-text);
+}
+
+.csd2-badge.csd2-status-unknown {
+  background: var(--csd2-gray-bg);
+  color: var(--csd2-gray-text);
+}
+
 .csd2-subtle {
   color: var(--csd2-muted);
   font-size: 13px;

@@ -196,6 +196,7 @@ export default function useAdminClients() {
             admin_id, company_id, agent, progress,
             is_paused, paused_at, paused_days_total,
             is_inactive, inactive_reason, inactivated_at,
+            last_report_update_at, next_payment_due_at,
             processing_duration,
             processing_stage, processing_stage_updated_at,
             company_tasks ( id, is_completed )
@@ -238,6 +239,8 @@ export default function useAdminClients() {
         ["is_inactive", "sql/add_inactive_status.sql"],
         ["inactive_reason", "sql/add_inactive_status.sql"],
         ["inactivated_at", "sql/add_inactive_status.sql"],
+        ["last_report_update_at", "sql/add_last_report_update.sql"],
+        ["next_payment_due_at", "sql/add_next_payment_due.sql"],
       ]) {
         if (baseErr && selectedFields.includes(col) && new RegExp(col, "i").test(baseErr.message || "")) {
           console.warn(`clients.${col} not found (run ${sqlFile}) — falling back without it.`);
@@ -539,6 +542,28 @@ export default function useAdminClients() {
     }
   }, [holidaySet]);
 
+  // Set Next Payment Due Date — same shape as handleSetPaidAt above, for
+  // the manually-set reminder date (sql/add_next_payment_due.sql) rather
+  // than the actual paid_at timestamp. Pass null to clear it.
+  const handleSetNextPaymentDue = useCallback(async (clientId, isoDateOrNull) => {
+    if (!clientId) return;
+    try {
+      const { error: upErr } = await supabase.from('clients').update({ next_payment_due_at: isoDateOrNull }).eq('id', clientId);
+      if (upErr) {
+        console.error('[useAdminClients] set next_payment_due_at error', upErr);
+        addToast({ title: "Update Failed", message: 'Failed to update payment due date: ' + upErr.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+        return;
+      }
+
+      setAllClients((prev) => prev.map((c) =>
+        c.id === clientId ? { ...c, next_payment_due_at: isoDateOrNull } : c
+      ));
+    } catch (e) {
+      console.error(e);
+      addToast({ title: "Update Failed", message: 'Failed to update payment due date', variant: "danger", icon: "bi-exclamation-triangle-fill" });
+    }
+  }, []);
+
   // Group multiple dispute_round rows for the same client (same email, a
   // separate `clients` row per round — see utils/clientDuplicateRound.js)
   // into one entry so the list shows one row per person instead of one row
@@ -755,5 +780,6 @@ export default function useAdminClients() {
     handleSetProcessingStage,
     handleSetPaidDays,
     handleSetPaidAt,
+    handleSetNextPaymentDue,
   };
 }

@@ -4,6 +4,7 @@ import { calculateFundingEligibility } from "../../../utils/funderRules";
 import { parseSmartCredit } from "../../../utils/parseSmartCredit"; 
 import { supabase } from "../../../supabaseClient";
 import { useToast } from "../ui/ToastNotifier";
+import { LTOS_COMPANY_ID } from "../../../utils/companies";
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 const addId = (item) => ({
@@ -263,8 +264,9 @@ export default function EmbeddableEligibilityChecker() {
           // silent accident, not a guarantee. Hardcoded outright so a
           // future embed can't accidentally misattribute leads by adding
           // one. LTOS's id confirmed live via companies table: id
-          // e33ef166-d381-458e-a5c8-ac77557d5ea2, company_name "LTOS".
-          const contextualCompanyId = "e33ef166-d381-458e-a5c8-ac77557d5ea2";
+          // e33ef166-d381-458e-a5c8-ac77557d5ea2, company_name "LTOS" —
+          // see src/utils/companies.js#LTOS_COMPANY_ID.
+          const contextualCompanyId = LTOS_COMPANY_ID;
           const cleanedEmail = leadEmail.toLowerCase().trim();
 
           const { count: existingEmailRows, error: countError } = await supabase

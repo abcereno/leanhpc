@@ -40,9 +40,36 @@ export async function fetchLenderAliases() {
   }
 }
 
-export async function classifyInquiries({ accounts, experian, transunion, equifax, lenderAliases }) {
+// Fetches standing rules taught via the AI Training Chat page
+// (sql/add_classification_rules.sql / AiTrainingChat.jsx) that apply to
+// classify-inquiries requests: every active global rule (client_id is
+// null), plus any active rule scoped to this specific client. Same
+// never-throws-on-missing-table posture as fetchLenderAliases — a client
+// with no rules yet, or the migration not being run, just means
+// classify-inquiries falls back to its built-in rules only.
+export async function fetchClassificationRules(clientId) {
+  try {
+    let query = supabase
+      .from("classification_rules")
+      .select("rule_text, creditor_pattern, action, client_id")
+      .eq("active", true);
+    query = clientId ? query.or(`client_id.is.null,client_id.eq.${clientId}`) : query.is("client_id", null);
+    const { data, error } = await query;
+    if (error) {
+      console.warn("Failed to load classification_rules (run sql/add_classification_rules.sql?):", error.message);
+      return [];
+    }
+    return data || [];
+  } catch (err) {
+    console.warn("Failed to load classification_rules:", err);
+    return [];
+  }
+}
+
+export async function classifyInquiries({ accounts, experian, transunion, equifax, lenderAliases, classificationRules, clientId }) {
   try {
     const aliases = lenderAliases ?? (await fetchLenderAliases());
+    const rules = classificationRules ?? (await fetchClassificationRules(clientId));
     const res = await fetch(
       `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/classify-inquiries`,
       {
@@ -51,7 +78,7 @@ export async function classifyInquiries({ accounts, experian, transunion, equifa
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ accounts, experian, transunion, equifax, lenderAliases: aliases }),
+        body: JSON.stringify({ accounts, experian, transunion, equifax, lenderAliases: aliases, classificationRules: rules }),
       }
     );
     const classified = await res.json();

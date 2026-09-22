@@ -237,6 +237,7 @@ export default function SmartIdiQModal({ show, onClose }) {
         experian: data.experian,
         transunion: data.transunion,
         equifax: data.equifax,
+        clientId: id,
       });
       if (!classified.success) throw new Error("Classification failed");
 
@@ -281,6 +282,7 @@ export default function SmartIdiQModal({ show, onClose }) {
         experian: parsed.experian,
         transunion: parsed.transunion,
         equifax: parsed.equifax,
+        clientId: id,
       });
       if (!classified.success) throw new Error("Classification failed");
 

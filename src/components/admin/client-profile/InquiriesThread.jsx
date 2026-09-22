@@ -415,7 +415,37 @@ export default function InquiriesThread({
                         </select>
                       )}
                     </td>
-                    {!readonly && <td className="text-end"><Button variant="outline-danger" size="sm" onClick={() => handleDeleteInquiry(index)}><i className="bi bi-trash"></i></Button></td>}
+                    {!readonly && (
+                      <td className="text-end text-nowrap">
+                        {/* Deep-links into the AI Training Chat
+                            (AiTrainingChat.jsx) pre-scoped to this client
+                            and pre-filled with this exact inquiry's
+                            creditor/bureau/date, so staff don't have to
+                            retype context that's already right here on
+                            screen. Opens in a new tab so the inquiries
+                            thread stays open behind it. */}
+                        {hasPermission("train_ai_rules") && (
+                          <Button
+                            variant="outline-info"
+                            size="sm"
+                            className="me-1"
+                            title="Teach the AI classifier about this inquiry"
+                            onClick={() => {
+                              const params = new URLSearchParams({
+                                clientId,
+                                creditor: getName(item) || "",
+                                bureau: item.bureau || "",
+                                date: getDate(item) || "",
+                              });
+                              window.open(`${window.location.origin}/ai-training-chat?${params.toString()}`, "_blank", "noopener,noreferrer");
+                            }}
+                          >
+                            <i className="bi bi-robot"></i>
+                          </Button>
+                        )}
+                        <Button variant="outline-danger" size="sm" onClick={() => handleDeleteInquiry(index)}><i className="bi bi-trash"></i></Button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

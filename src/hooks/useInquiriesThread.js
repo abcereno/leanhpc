@@ -16,12 +16,10 @@ import { syncCountReviewRequests, buildApprovedCountsForApprover } from "../util
 import { formatDurationBetween } from "../utils/formatDuration";
 import { useToast } from "../components/shared/ui/ToastNotifier";
 import { useConfirm } from "../components/shared/ui/ConfirmDialog";
+import { sendFullCompletionWebhook, sendBureauCompletionWebhook } from "../utils/completionWebhook";
 
-const BUCKET = "clients"; 
+const BUCKET = "clients";
 const APP_SCRIPT_URL = import.meta.env.VITE_APP_SCRIPT_URL;
-
-// 👇 UPDATED WEBHOOK URL 👇
-const COMPLETION_WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/423af280-1504-4014-9f5e-f10b9bbc0985";
 
 // normClass/isIgnoredStatus are aliases onto utils/inquiryCounts.js's
 // shared normalizeClassification/isNonDisputableClassification — kept
@@ -101,49 +99,6 @@ export default function useInquiriesThread({
     setCounts({ total: list.length, perBureau, perClassification });
   }, []);
 
-  async function sendCompletionWebhook({ clientId, statuses, newlyCompleted, reason = "transition_only" }) {
-    if (!COMPLETION_WEBHOOK_URL) return;
-    const { data: clientRow, error: clientErr } = await supabase
-      .from("clients")
-      .select("id, full_name, email, phone, admin_id, company_id, company_name, agent_id, agent")
-      .eq("id", clientId)
-      .single();
-      
-    if (clientErr || !clientRow) return;
-
-    let adminName = null;
-    if (clientRow.admin_id) {
-      const { data: adminRow } = await supabase.from("profiles").select("full_name").eq("id", clientRow.admin_id).single();
-      if (adminRow) adminName = adminRow.full_name;
-    }
-
-    const payload = {
-      client: { 
-        id: clientRow.id, 
-        full_name: clientRow.full_name || "", 
-        email: clientRow.email || "", 
-        phone: clientRow.phone || "", 
-        admin_id: clientRow.admin_id || null, 
-        admin_name: adminName,
-        company_id: clientRow.company_id || null,
-        company_name: clientRow.company_name || "",
-        agent_id: clientRow.agent_id || null,
-        agent_name: clientRow.agent || ""
-      },
-      statuses, 
-      completed: newlyCompleted, 
-      reason, 
-      completed_at: new Date().toISOString(),
-    };
-
-    try {
-      await fetch(COMPLETION_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    } catch (e) {
-      console.error("❌ Error sending completion webhook:", e);
-      try { await fetch(COMPLETION_WEBHOOK_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); } catch(e2) {console.log(e2);}
-    }
-  }
-
   // --- Fetch ---
   const fetchInquiriesThread = useCallback(async () => {
     if (!id) return [];
@@ -217,7 +172,7 @@ export default function useInquiriesThread({
   useEffect(() => { fetchApprovedCounts(); }, [fetchApprovedCounts]);
 
   // --- SAVE ---
-  const saveUpdatedThread = useCallback(async (overrideInquiries = null, forceWebhook = false) => {
+  const saveUpdatedThread = useCallback(async (overrideInquiries = null) => {
     if (!id) return false; 
     setSaving(true);
     
@@ -528,14 +483,41 @@ export default function useInquiriesThread({
 
         // --- WEBHOOK FIRING LOGIC ---
         const statuses = { exp: expStatus === "done", tu: tuStatus === "done", eq: eqStatus === "done" };
-        
-        if ((isFullyCompleted && !prevIsFullyCompleted) || forceWebhook) {
-             await sendCompletionWebhook({
-                 clientId: id, 
-                 statuses, 
+
+        if (isFullyCompleted && !prevIsFullyCompleted) {
+             await sendFullCompletionWebhook({
+                 clientId: id,
+                 statuses,
                  newlyCompleted: { exp: true, tu: true, eq: true },
-                 reason: "all_non_linked_deleted_100_percent" 
+                 reason: "all_non_linked_deleted_100_percent"
              });
+        }
+
+        // "bureau_completed" — fires per-bureau, independent of the other
+        // two bureaus' state, so a GHL workflow can react the moment (say)
+        // Experian alone resolves instead of only ever hearing about it once
+        // every bureau is done. A bureau is "resolved" the same way
+        // isFullyCompleted defines it above (done OR na) — comparing this
+        // save's status against the pre-save status (prevProgress) catches
+        // a single-bureau action (e.g. "Experian Complete") AND a
+        // multi-bureau one ("Mark All Complete") firing once per bureau
+        // that actually just transitioned, never one already resolved
+        // before this save.
+        const isResolved = (status) => status === "done" || status === "na";
+        const bureauTransitions = [
+            ["Experian", prevProgress.expStatus, expStatus],
+            ["TransUnion", prevProgress.tuStatus, tuStatus],
+            ["Equifax", prevProgress.eqStatus, eqStatus],
+        ];
+        for (const [bureau, prevStatus, status] of bureauTransitions) {
+            if (isResolved(status) && !isResolved(prevStatus)) {
+                await sendBureauCompletionWebhook({
+                    clientId: id,
+                    bureau,
+                    status,
+                    reason: "bureau_resolved_via_classification",
+                });
+            }
         }
 
         // --- AI TRAINING ---
@@ -751,8 +733,14 @@ export default function useInquiriesThread({
     setInquiries(updatedInquiries);
     updateCounts_(updatedInquiries);
 
-    const forceWebhook = targetBureau === "All";
-    await saveUpdatedThread(updatedInquiries, forceWebhook);
+    // Completion webhook fires on its own, accurately, inside
+    // saveUpdatedThread (isFullyCompleted && !prevIsFullyCompleted, computed
+    // from this same just-saved data) — no forced/hardcoded fire needed here.
+    // See ClientHeader.jsx's finalizeBureauAction for the other half of this
+    // fix: it no longer double-fires this webhook for classification-based
+    // services (this one), only for direct-bureau services that never pass
+    // through this hook at all.
+    await saveUpdatedThread(updatedInquiries);
 
   }, [inquiries, updateCounts_, saveUpdatedThread]);
 
@@ -784,8 +772,8 @@ export default function useInquiriesThread({
     setInquiries(updatedInquiries);
     updateCounts_(updatedInquiries);
 
-    const forceWebhook = targetBureau === "All";
-    await saveUpdatedThread(updatedInquiries, forceWebhook);
+    // See markAllNonLinkedAsDeleted above — same fix, same reasoning.
+    await saveUpdatedThread(updatedInquiries);
 
   }, [inquiries, updateCounts_, saveUpdatedThread]);
 

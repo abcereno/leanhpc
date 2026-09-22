@@ -9,6 +9,7 @@ import { useToast } from "../../shared/ui/ToastNotifier";
 import { saveUpdateAudit } from "../../../utils/reportStorage";
 import { serviceLabel, resolveServiceId } from "../../../utils/services";
 import { PROCESSING_STAGES, processingStageLabel } from "../../../utils/processingStage";
+import { getCaseManagementCountdown, getPaymentDueStatus } from "../../../utils/aging";
 
 // Extracted hooks
 import { usePiReveal } from "../../../hooks/usePiReveal";
@@ -29,9 +30,10 @@ import SSNManagerModal from "./modals/SSNManagerModal";
 import InvoiceGeneratorModal from "./modals/InvoiceGeneratorModal";
 import ManagerOverrideModal from "./modals/ManagerOverrideModal";
 import MarkPaidAmountModal from "./modals/MarkPaidAmountModal";
+import EditPaymentPlanModal from "./modals/EditPaymentPlanModal";
 import RegenerateHistoryBtn from "../RegenerateHistoryBtn";
-
-const COMPLETION_WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/423af280-1504-4014-9f5e-f10b9bbc0985";
+import ClientBillingPanel from "./ClientBillingPanel";
+import { sendFullCompletionWebhook, sendBureauCompletionWebhook } from "../../../utils/completionWebhook";
 
 // Matches AlignmentCheckPanel.jsx's identityRows labels — kept as a small
 // local copy here rather than importing from a component file, since
@@ -359,42 +361,6 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
   };
 
 
-  const fireCompletionWebhook = async () => {
-      const payload = {
-        client: { 
-          id: client.id, 
-          full_name: client.full_name || "", 
-          email: client.email || "", 
-          phone: client.phone || "", 
-          admin_id: client.admin_id || null, 
-          admin_name: client.admin_name || "",
-          company_id: client.company_id || null,
-          company_name: client.company_name || "",
-          agent_id: client.agent_id || null,
-          agent_name: client.agent || ""
-        },
-        statuses: { exp: true, tu: true, eq: true }, 
-        completed: { exp: true, tu: true, eq: true }, 
-        reason: "all_bureaus_completed_via_button", 
-        completed_at: new Date().toISOString(),
-      };
-
-      try {
-        await fetch(COMPLETION_WEBHOOK_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        });
-      } catch (e) {
-        console.error("❌ Webhook failed:", e);
-        try {
-            await fetch(COMPLETION_WEBHOOK_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-        } catch (e2) {
-            console.error("❌ Webhook fallback also failed:", e2);
-        }
-      }
-  };
-
   // Shared tail for both bureau "Complete" and "N/A" actions — checks
   // whether this action just brought the client to fully done (every
   // bureau completed OR N/A — matching classifyBureauStatus's own
@@ -409,7 +375,19 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
   // which meant a client already legitimately N/A on one bureau would
   // never register as "fully done" here and could silently miss firing
   // the completion webhook.
-  const finalizeBureauAction = async (bureauFull) => {
+  //
+  // fireWebhook=false is used by the classification-based callers
+  // (runBureauComplete/runBureauNA) below — for those,
+  // useInquiriesThread.js#saveUpdatedThread already fires this same
+  // completion webhook itself, computed from the just-saved classification
+  // data (accurate) rather than this function's `client` prop (stale —
+  // markAllNonLinkedAsDeleted/DND's save hasn't been reflected back into
+  // `client` yet when this runs) and its `bureauFull === "All"` shortcut
+  // (which claimed every bureau resolved on any "All" action, right or
+  // not). Firing it again here duplicated it. The direct-bureau callers
+  // (runDirectBureauComplete/runDirectBureauNA) have no other trigger path
+  // at all, so they keep firing it from here.
+  const finalizeBureauAction = async (bureauFull, { fireWebhook = true } = {}) => {
       const isExpResolved = bureauFull === "Experian" || bureauFull === "All" || client.exp_completed || client.exp_na;
       const isTuResolved = bureauFull === "TransUnion" || bureauFull === "All" || client.tu_completed || client.tu_na;
       const isEqResolved = bureauFull === "Equifax" || bureauFull === "All" || client.eq_completed || client.eq_na;
@@ -419,8 +397,13 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
           (client.tu_completed || client.tu_na) &&
           (client.eq_completed || client.eq_na);
 
-      if (isExpResolved && isTuResolved && isEqResolved && !wasAlreadyDone) {
-          await fireCompletionWebhook();
+      if (fireWebhook && isExpResolved && isTuResolved && isEqResolved && !wasAlreadyDone) {
+          await sendFullCompletionWebhook({
+              clientId: client.id,
+              statuses: { exp: true, tu: true, eq: true },
+              newlyCompleted: { exp: true, tu: true, eq: true },
+              reason: "all_bureaus_completed_via_button",
+          });
       }
 
       await refetchAuthHolds();
@@ -429,12 +412,14 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
   // "Mark [Bureau] Complete" — reclassifies remaining actionable items to
   // Deleted and saves through the real classification engine (see
   // useInquiriesThread.js#markAllNonLinkedAsDeleted), which is what
-  // actually computes exp_completed/tu_completed/eq_completed now.
+  // actually computes exp_completed/tu_completed/eq_completed now — and,
+  // as of the fix above, is also the sole place the completion webhook
+  // fires for this service type.
   const runBureauComplete = async (bureauFull) => {
       if (markAllNonLinkedAsDeleted) {
           await markAllNonLinkedAsDeleted(bureauFull);
       }
-      await finalizeBureauAction(bureauFull);
+      await finalizeBureauAction(bureauFull, { fireWebhook: false });
   };
 
   // "Mark [Bureau] N/A" — the self-healing counterpart: reclassifies
@@ -446,7 +431,7 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
       if (markAllNonLinkedAsDND) {
           await markAllNonLinkedAsDND(bureauFull);
       }
-      await finalizeBureauAction(bureauFull);
+      await finalizeBureauAction(bureauFull, { fireWebhook: false });
   };
 
   // HPC Ops Sprint Priority 1 (Inquiry Authorization Protection). A bureau
@@ -507,13 +492,43 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
   // identically once all three bureaus are resolved.
   const BUREAU_KEY = { Experian: "exp", TransUnion: "tu", Equifax: "eq" };
 
+  // Which bureaus a "All" vs single-bureau action actually targets — shared
+  // by the two per-bureau webhook loops below.
+  const bureausTargetedBy = (bureauFull) =>
+      bureauFull === "All" ? ["Experian", "TransUnion", "Equifax"] : [bureauFull];
+
+  // "bureau_completed" fires once per bureau this click newly resolves —
+  // checked against `client`'s state from BEFORE this action (same data
+  // finalizeBureauAction's own wasAlreadyDone check already trusts), so
+  // re-clicking an already-resolved bureau (or the "All" button when some
+  // bureaus were already done) doesn't refire for those.
   const runDirectBureauComplete = async (bureauFull) => {
+      const alreadyResolved = {
+          Experian: client.exp_completed || client.exp_na,
+          TransUnion: client.tu_completed || client.tu_na,
+          Equifax: client.eq_completed || client.eq_na,
+      };
       await actions.markBureauComplete(bureauFull === "All" ? "all" : BUREAU_KEY[bureauFull]);
+      for (const bureau of bureausTargetedBy(bureauFull)) {
+          if (!alreadyResolved[bureau]) {
+              await sendBureauCompletionWebhook({ clientId: client.id, bureau, status: "done", reason: "bureau_marked_complete_via_button" });
+          }
+      }
       await finalizeBureauAction(bureauFull);
   };
 
   const runDirectBureauNA = async (bureauFull) => {
+      const alreadyResolved = {
+          Experian: client.exp_completed || client.exp_na,
+          TransUnion: client.tu_completed || client.tu_na,
+          Equifax: client.eq_completed || client.eq_na,
+      };
       await actions.markBureauNA(bureauFull === "All" ? "all" : BUREAU_KEY[bureauFull]);
+      for (const bureau of bureausTargetedBy(bureauFull)) {
+          if (!alreadyResolved[bureau]) {
+              await sendBureauCompletionWebhook({ clientId: client.id, bureau, status: "na", reason: "bureau_marked_na_via_button" });
+          }
+      }
       await finalizeBureauAction(bureauFull);
   };
 
@@ -526,6 +541,7 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
     ssnManager: <SSNManagerModal show onClose={closeModal} clientId={clientId} onSaved={handleModalSave} />,
     generateInvoice: <InvoiceGeneratorModal show onClose={closeModal} client={client} />,
     markPaid: <MarkPaidAmountModal show onClose={closeModal} clientName={client?.full_name} onConfirm={actions.markAsPaid} />,
+    editBillingPlan: <EditPaymentPlanModal show onClose={closeModal} clientName={client?.full_name} initial={client} onConfirm={actions.setPaymentPlan} />,
   };
 
   if (loading) return <div>Loading client details...</div>;
@@ -554,6 +570,16 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
   const onBureauComplete = isDirectBureauService ? runDirectBureauComplete : handleBureauComplete;
   const onBureauNA = isDirectBureauService ? runDirectBureauNA : handleBureauNA;
 
+  // Case Management ("credit repair") doesn't track bureau completion the
+  // way Inquiry Deletion does, so ops needs a periodic reminder to pull a
+  // fresh report instead — see utils/aging.js#getCaseManagementCountdown.
+  // Gated on is_paid same as every other post-payment badge/action here.
+  const isCaseManagement = serviceId === "credit_repair";
+  const reimportCountdown = isCaseManagement && client.is_paid ? getCaseManagementCountdown(client) : null;
+  // Plain staff-set reminder date (sql/add_next_payment_due.sql) — not
+  // service-gated, since it's not derived from any bureau/report workflow.
+  const paymentDue = getPaymentDueStatus(client);
+
   return (
     <>
       <ReceiptPreviewModal receipt={receipt} />
@@ -573,6 +599,12 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                 {client.is_inactive && (
                   <Badge bg="secondary" className="ms-2 shadow-sm" title={client.inactive_reason || undefined}>
                     <i className="bi bi-slash-circle-fill me-1" />INACTIVE
+                  </Badge>
+                )}
+                {paymentDue && (
+                  <Badge bg={paymentDue.isOverdue ? "danger" : "info"} text={paymentDue.isOverdue ? undefined : "dark"} className="ms-2 shadow-sm" title={`Payment due ${new Date(client.next_payment_due_at + "T00:00:00").toLocaleDateString()}`}>
+                    <i className="bi bi-cash-coin me-1" />
+                    {paymentDue.isOverdue ? `PAYMENT OVERDUE ${Math.abs(paymentDue.daysLeft)}d` : `PAYMENT DUE ${paymentDue.daysLeft}d`}
                   </Badge>
                 )}
                 {/* date_completed is set once, automatically, by the
@@ -683,6 +715,29 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
         {/* ── Card Body ── */}
         {!readonly && (
           <div className="card-body">
+            {/* Case Management report re-import reminder — 30 days from
+                last_report_update_at (or paid_at if there's been no Update
+                yet), see utils/aging.js#getCaseManagementCountdown. Reuses
+                the exact same "Update Existing -> Via SmartCredit" action
+                the Reports dropdown already offers (setIsUpdateMode(true) +
+                setActiveModal("fetch3b")) instead of a second import path. */}
+            {reimportCountdown && (
+              <Alert variant={reimportCountdown.isOverdue ? "danger" : "info"} className="mb-3 shadow-sm d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div>
+                  <i className={`bi ${reimportCountdown.isOverdue ? "bi-exclamation-triangle-fill" : "bi-hourglass-split"} me-2`}></i>
+                  <strong>Next Import: {reimportCountdown.isOverdue ? `Overdue ${Math.abs(reimportCountdown.daysLeft)}d` : `${reimportCountdown.daysLeft} Days`}</strong>
+                  {" — "}periodic Case Management check-in, pull a fresh report to review progress.
+                </div>
+                <Button
+                  size="sm"
+                  variant={reimportCountdown.isOverdue ? "light" : "info"}
+                  className="fw-bold flex-shrink-0"
+                  onClick={() => { setIsUpdateMode(true); setActiveModal("fetch3b"); }}
+                >
+                  <i className="bi bi-arrow-repeat me-1"></i> Re-Import Credit Report
+                </Button>
+              </Alert>
+            )}
             {client.recent_apps_notes && (
               <Alert variant="warning" className="mb-3 shadow-sm">
                 <Alert.Heading className="h6 fw-bold"><i className="bi bi-exclamation-triangle-fill me-2" />Do Not Remove These Inquiries</Alert.Heading>
@@ -789,6 +844,17 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                           <Dropdown.Item onClick={actions.toggleInactive} className={`${client.is_inactive ? "text-success" : "text-secondary"} py-2`}>
                             <i className={`bi ${client.is_inactive ? "bi-arrow-counterclockwise" : "bi-slash-circle"} me-2`} />
                             {client.is_inactive ? "Reactivate Client" : "Mark Inactive"}
+                          </Dropdown.Item>
+                          {/* Consolidated billing fields — total due, split-
+                              plan installments/amount, and the payment-due
+                              reminder date, all edited together. See
+                              sql/add_payment_plan.sql / sql/add_next_payment_due.sql.
+                              Read back in the Billing & Payment Plan panel
+                              below and the payment-due badge next to the
+                              client's name above. */}
+                          <Dropdown.Item onClick={() => setActiveModal("editBillingPlan")} className="text-info py-2">
+                            <i className="bi bi-cash-stack me-2" />
+                            Edit Billing / Payment Plan
                           </Dropdown.Item>
                           {/* Manually-selected processing stage (see
                               utils/processingStage.js) — where a file
@@ -930,6 +996,11 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                               : <><i className="bi bi-arrow-repeat me-2 text-warning" /> Start New Round (Round {(client.dispute_round || 1) + 1})</>}
                           </Dropdown.Item>
                         )}
+                        {hasPermission("train_ai_rules") && (
+                          <Dropdown.Item onClick={() => openTab(`/ai-training-chat?clientId=${clientId}`)} className="py-2">
+                            <i className="bi bi-chat-dots me-2 text-info" /> Teach AI Classifier
+                          </Dropdown.Item>
+                        )}
                         <Dropdown.Divider className="border-secondary opacity-25 my-2" />
                         <Dropdown.Item onClick={() => setActiveModal("ssnManager")} className="text-danger fw-bold py-2"><i className="bi bi-shield-lock me-2" /> SSN Manager</Dropdown.Item>
                       </Dropdown.Menu>
@@ -943,6 +1014,21 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Consolidated Billing & Payment Plan panel — one spot for
+                payment amount, next due date, split-plan progress, and
+                report last/next-update, per explicit request rather than
+                only the scattered badges above. See ClientBillingPanel.jsx.
+                Already inside the outer `!readonly` guard above. */}
+            <div className="mt-4">
+              <ClientBillingPanel
+                client={client}
+                paymentDue={paymentDue}
+                reimportCountdown={reimportCountdown}
+                onEdit={canEdit ? () => setActiveModal("editBillingPlan") : null}
+                refreshKey={refreshKey}
+              />
             </div>
 
             {/* AI document validity check — warning only, see comment on

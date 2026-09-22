@@ -84,6 +84,13 @@ export const PERMISSION_GROUPS = [
       // approve_count_reviews — resolving "the AI wasn't confident here" is
       // a different decision from approving a dispute count.
       { key: "review_ai_flags", label: "Review AI Classification Flags" },
+      // Gates the AI Training Chat (src/components/admin/AiTrainingChat.jsx):
+      // teaching classify-inquiries new standing rules in plain English
+      // (see sql/add_classification_rules.sql). Separate from
+      // review_ai_flags — reviewing a flagged classification and actively
+      // changing how the classifier behaves going forward are different
+      // levels of trust.
+      { key: "train_ai_rules", label: "Train AI Classifier" },
     ],
   },
   {

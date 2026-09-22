@@ -7,12 +7,38 @@
 // live dashboard staff already use every day is completely unaffected
 // while this is reviewed.
 //
-// Data: per explicit product decision, this tracks calls to EXISTING
-// PAYING CLIENTS (clients.is_paid = true), not new/unconverted leads —
-// so "Contact Name/Phone" in the mockup's Log Call modal becomes a
-// client picker (SearchableSelect, same component the Add Income modal
-// already uses for the same 1000+-row problem) rather than free-text
-// entry, and every call is tied to a real client_id.
+// Scope: LTOS only (companies.id "e33ef166-d381-458e-a5c8-ac77557d5ea2",
+// see LTOS_COMPANY_ID below) — per explicit product decision, this is a
+// dashboard for one company's CS team, not a platform-wide tool. Every
+// query here filters to that company_id.
+//
+// Data covers THREE contact buckets, from two tables:
+//   - Paying clients: clients.company_id = LTOS, is_paid = true — the
+//     original scope of this dashboard.
+//   - Unpaid/signup clients: clients.company_id = LTOS, is_paid = false —
+//     includes anyone who signed up via the login page's "Individual" tab
+//     (handle_new_user()'s INDIVIDUAL CLIENT ROUTING branch + the
+//     IndividualLayout.jsx/IndividualDashboard.jsx client-side self-heal
+//     paths all set company_id = LTOS on these rows now — see
+//     sql/add_individual_signup_company.sql and src/utils/companies.js).
+//     These are still `clients` rows (they already have a client_id), so
+//     cs_call_log ties to them the same way as paying clients — NOT via
+//     lead_id. Shown in the Leads tab (CS still needs to call/convert
+//     them) but kept in their own bucket from company_leads below since
+//     they're a different table with different fields (no funder
+//     eligibility status).
+//   - Leads: raw prospects captured by the public funding-eligibility
+//     widget (company_leads, see EmbeddableEligibilityChecker.jsx#
+//     submitLeadForm — every lead from that widget is hardcoded to
+//     LTOS's company_id since it's the only company running that funnel).
+//     These are NOT rows in `clients` — a lead has no client_id until
+//     someone manually converts/adds them as a client — so cs_call_log
+//     can be tied to EITHER a client_id OR a lead_id (see
+//     sql/add_cs_call_log_leads.sql), never both. `contactType` on each
+//     derived record below ("client" | "lead") tracks which table a call
+//     was logged against; the Leads tab's `source` field ("Funding
+//     Widget" | "Client Signup") tracks which of the two prospect
+//     sources a row displayed there came from.
 //
 // Backed by sql/add_cs_call_log.sql (`cs_call_log` table) — a NEW table,
 // not the existing `call_logs` (bureau dispute calls, EXP/TU/EQ with
@@ -34,9 +60,13 @@ import { supabase } from "../../../supabaseClient";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../shared/ui/ToastNotifier";
 import SearchableSelect from "../../shared/ui/SearchableSelect";
+import { LTOS_COMPANY_ID } from "../../../utils/companies";
 import "./CsDashboard2.css";
 
 const OUTCOMES = ["Interested", "Follow Up", "Called", "Not Interested", "Appointment Set"];
+
+// See the file header comment — every query in this dashboard is scoped
+// to this one company (src/utils/companies.js#LTOS_COMPANY_ID).
 
 const NAV_ITEMS = [
   { key: "dashboard", icon: "🏠", label: "Dashboard" },
@@ -64,6 +94,26 @@ function initialsFromName(name) {
 
 function badgeClass(outcome) {
   return "csd2-" + String(outcome || "Called").toLowerCase().replace(/\s+/g, "-");
+}
+
+// company_leads.computed_status is GREEN/YELLOW/RED/UNKNOWN (see
+// CompanyLeadsList.jsx's getStatusBadge for the same vocabulary) — maps
+// onto the same green/yellow/red CSS vars the outcome badges above
+// already use, plus a neutral gray for UNKNOWN.
+function statusBadgeClass(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "GREEN") return "csd2-status-green";
+  if (s === "YELLOW") return "csd2-status-yellow";
+  if (s === "RED") return "csd2-status-red";
+  return "csd2-status-unknown";
+}
+
+function statusLabel(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "GREEN") return "Green / Ready";
+  if (s === "YELLOW") return "Yellow / Review";
+  if (s === "RED") return "Red / High Risk";
+  return "Unknown";
 }
 
 function todayIsoDay() {
@@ -119,6 +169,12 @@ export default function CsDashboard2() {
   const [migrationMissing, setMigrationMissing] = useState(false);
   const [calls, setCalls] = useState([]);
   const [payingClients, setPayingClients] = useState([]);
+  // Unpaid LTOS clients — includes anyone who signed up as an individual
+  // (see the file header comment). These are `clients` rows, not
+  // `company_leads` rows, but are treated as prospects in the Leads tab
+  // since they haven't converted to paying clients yet.
+  const [unpaidClients, setUnpaidClients] = useState([]);
+  const [leads, setLeads] = useState([]);
   const [activeSection, setActiveSection] = useState("call-log");
   const [saving, setSaving] = useState(false);
 
@@ -126,6 +182,12 @@ export default function CsDashboard2() {
   const [activeDetailTab, setActiveDetailTab] = useState("details");
 
   const [showLogModal, setShowLogModal] = useState(false);
+  // Set right before opening the modal from a specific lead/client row's
+  // own "Log Call" button, so SearchableSelect (mount-only defaultValue —
+  // see its own header comment) opens pre-selected instead of blank.
+  // Cleared on close so the next "+ Log New Call" (no row context) opens
+  // blank again.
+  const [prefillContactValue, setPrefillContactValue] = useState("");
   const formRef = useRef(null);
 
   // Filters (Call Log section)
@@ -138,24 +200,36 @@ export default function CsDashboard2() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [callsRes, clientsRes] = await Promise.all([
+      const [callsRes, clientsRes, leadsRes] = await Promise.all([
         supabase
           .from("cs_call_log")
-          .select("*, clients ( id, full_name, phone, email )")
+          // `leads:` aliases the company_leads embed so it doesn't collide
+          // with the `clients` embed — a call row has exactly one of the
+          // two populated (see sql/add_cs_call_log_leads.sql's xor check).
+          .select("*, clients ( id, full_name, phone, email ), leads:company_leads ( id, full_name, phone, email, computed_status )")
           .order("created_at", { ascending: false }),
+        // One query for every LTOS client, split client-side into paid vs
+        // unpaid below — cheaper than two separate round trips and keeps
+        // "what counts as an LTOS client" defined in exactly one place.
         supabase
           .from("clients")
           .select("id, full_name, phone, email, is_paid")
-          .eq("is_paid", true)
+          .eq("company_id", LTOS_COMPANY_ID)
           .order("full_name", { ascending: true }),
+        supabase
+          .from("company_leads")
+          .select("id, full_name, phone, email, monitoring_username, computed_status, company_id, created_at")
+          .eq("company_id", LTOS_COMPANY_ID)
+          .order("created_at", { ascending: false }),
       ]);
 
       if (callsRes.error) {
-        // Migration not run yet (sql/add_cs_call_log.sql) — fail soft with
-        // a visible notice instead of a blank/broken page, same pattern
+        // Migration not run yet (sql/add_cs_call_log.sql, or the lead_id
+        // follow-up sql/add_cs_call_log_leads.sql) — fail soft with a
+        // visible notice instead of a blank/broken page, same pattern
         // useAlignmentDocs.js and others in this codebase already use for
         // optional-migration tables.
-        if (/cs_call_log/i.test(callsRes.error.message || "")) {
+        if (/cs_call_log|company_leads/i.test(callsRes.error.message || "")) {
           setMigrationMissing(true);
           setCalls([]);
         } else {
@@ -167,7 +241,12 @@ export default function CsDashboard2() {
       }
 
       if (clientsRes.error) throw clientsRes.error;
-      setPayingClients(clientsRes.data || []);
+      const allLtosClients = clientsRes.data || [];
+      setPayingClients(allLtosClients.filter((c) => c.is_paid));
+      setUnpaidClients(allLtosClients.filter((c) => !c.is_paid));
+
+      if (leadsRes.error) throw leadsRes.error;
+      setLeads(leadsRes.data || []);
     } catch (err) {
       console.error("CsDashboard2 load error:", err);
       addToast({ title: "Load Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
@@ -178,17 +257,22 @@ export default function CsDashboard2() {
 
   useEffect(() => { loadData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Normalizes each raw cs_call_log row (joined with its client) into the
-  // flat shape every section below renders from — same role the pasted
-  // mockup's own `records` array played, just sourced from Supabase
-  // instead of an in-memory array.
+  // Normalizes each raw cs_call_log row (joined with its client OR lead —
+  // see the file header comment) into the flat shape every section below
+  // renders from — same role the pasted mockup's own `records` array
+  // played, just sourced from Supabase instead of an in-memory array.
+  // contactType tracks which relation was actually populated so the UI
+  // (badges, the details drawer, Leads vs Clients grouping) never has to
+  // re-derive it from clientId/leadId being null/non-null itself.
   const records = useMemo(
     () =>
       calls.map((c) => ({
         id: c.id,
         clientId: c.client_id,
-        name: c.clients?.full_name || "Unknown Client",
-        phone: c.phone || c.clients?.phone || "",
+        leadId: c.lead_id,
+        contactType: c.lead_id ? "lead" : "client",
+        name: c.clients?.full_name || c.leads?.full_name || "Unknown Contact",
+        phone: c.phone || c.clients?.phone || c.leads?.phone || "",
         callDateIso: c.call_date,
         followUpIso: c.follow_up_date || "",
         date: formatDateForDisplay(c.call_date),
@@ -211,10 +295,12 @@ export default function CsDashboard2() {
   // --- Stats ---
   const callsToday = useMemo(() => records.filter((r) => r.callDateIso === todayIsoDay()).length, [records]);
   const followUpsDueToday = useMemo(() => records.filter((r) => r.followUpIso === todayIsoDay()).length, [records]);
-  const newLeadsCount = useMemo(
-    () => records.filter((r) => String(r.leadStatus || "").toLowerCase().includes("new")).length,
-    [records]
-  );
+  // Real count from company_leads + unpaid clients now, not a heuristic
+  // string-match over call records — every LTOS lead/unpaid signup is
+  // inherently "new" until they convert to a paying client (mirrors
+  // AdminNewLeads.jsx's own convention of treating the whole unpaid pool
+  // as "new", no extra recency filter).
+  const newLeadsCount = leads.length + unpaidClients.length;
   const appointmentsSetCount = useMemo(() => records.filter((r) => r.outcome === "Appointment Set").length, [records]);
 
   const statCards = [
@@ -241,7 +327,6 @@ export default function CsDashboard2() {
 
   // --- Derived sections (all off the same `records`, matching the
   // mockup's own architecture — no extra fetches per nav tab) ---
-  const leadsData = useMemo(() => records.filter((r) => r.outcome !== "Not Interested"), [records]);
   const followUpsData = useMemo(
     () => records.filter((r) => r.followUpIso).slice().sort((a, b) => compareIsoDates(a.followUpIso, b.followUpIso)),
     [records]
@@ -268,51 +353,125 @@ export default function CsDashboard2() {
         .sort((a, b) => compareIsoDates(a.followUpIso || a.callDateIso, b.followUpIso || b.callDateIso)),
     [records]
   );
+  // Shared by clientsRows and leadsRows' signup bucket below — both key off
+  // client_id (unpaid signup clients are still `clients` rows, so a call
+  // logged against one is a contactType:"client" record exactly like a
+  // paying client's). One map instead of two separate reductions over the
+  // same `records` array.
+  const latestByClientId = useMemo(() => {
+    const map = new Map();
+    records.forEach((r) => {
+      if (r.contactType !== "client") return;
+      const existing = map.get(r.clientId);
+      if (!existing || compareIsoDates(r.callDateIso, existing.callDateIso) > 0) map.set(r.clientId, r);
+    });
+    return map;
+  }, [records]);
   // Every paying client, not just ones filtered from `records` the way the
   // mockup's generic-lead version did — we already have a canonical
   // `clients` table, so this shows the real roster (including anyone never
   // called yet) with their most recent call summarized alongside.
-  const clientsRows = useMemo(() => {
-    const latestByClient = new Map();
+  const clientsRows = useMemo(
+    () =>
+      payingClients.map((c) => ({
+        id: c.id,
+        name: c.full_name,
+        phone: c.phone || "—",
+        lastOutcome: latestByClientId.get(c.id)?.outcome || "Not yet called",
+        lastCallDate: latestByClientId.get(c.id)?.date || "—",
+        owner: latestByClientId.get(c.id)?.calledBy || "—",
+      })),
+    [payingClients, latestByClientId]
+  );
+  // Combines two prospect sources into one "real roster + latest call
+  // alongside" list — company_leads (public widget) and unpaid `clients`
+  // rows (individual signups, see the file header comment). Each row
+  // carries `source` so the table/badges can tell them apart, and
+  // `contactType`/`contactId` so Log Call routes to the right id space
+  // (lead_id vs client_id) without the UI having to know which table a
+  // given row came from.
+  const leadsRows = useMemo(() => {
+    const latestByLead = new Map();
     records.forEach((r) => {
-      const existing = latestByClient.get(r.clientId);
-      if (!existing || compareIsoDates(r.callDateIso, existing.callDateIso) > 0) latestByClient.set(r.clientId, r);
+      if (r.contactType !== "lead") return;
+      const existing = latestByLead.get(r.leadId);
+      if (!existing || compareIsoDates(r.callDateIso, existing.callDateIso) > 0) latestByLead.set(r.leadId, r);
     });
-    return payingClients.map((c) => ({
-      id: c.id,
+
+    const widgetRows = leads.map((l) => ({
+      rowKey: `lead:${l.id}`,
+      contactType: "lead",
+      contactId: l.id,
+      source: "Funding Widget",
+      name: l.full_name,
+      phone: l.phone || "—",
+      email: l.email || "—",
+      status: l.computed_status,
+      lastOutcome: latestByLead.get(l.id)?.outcome || "Not yet called",
+      lastCallDate: latestByLead.get(l.id)?.date || "—",
+      owner: latestByLead.get(l.id)?.calledBy || "—",
+    }));
+
+    const signupRows = unpaidClients.map((c) => ({
+      rowKey: `client:${c.id}`,
+      contactType: "client",
+      contactId: c.id,
+      source: "Client Signup",
       name: c.full_name,
       phone: c.phone || "—",
-      lastOutcome: latestByClient.get(c.id)?.outcome || "Not yet called",
-      lastCallDate: latestByClient.get(c.id)?.date || "—",
-      owner: latestByClient.get(c.id)?.calledBy || "—",
+      email: c.email || "—",
+      status: null, // no funder eligibility check for a direct signup
+      lastOutcome: latestByClientId.get(c.id)?.outcome || "Not yet called",
+      lastCallDate: latestByClientId.get(c.id)?.date || "—",
+      owner: latestByClientId.get(c.id)?.calledBy || "—",
     }));
-  }, [payingClients, records]);
+
+    return [...widgetRows, ...signupRows].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }, [leads, unpaidClients, records, latestByClientId]);
   const outcomeGroups = useMemo(() => groupCounts(records, (r) => r.outcome), [records]);
   const callerGroups = useMemo(() => groupCounts(records, (r) => r.calledBy), [records]);
 
   // --- Actions ---
   const openLogModal = () => setShowLogModal(true);
+  // Opened from a specific client/lead row's own "Log Call" button —
+  // pre-selects that contact in the combined picker below (see
+  // prefillContactValue's own comment for why this has to be set BEFORE
+  // the modal — and a fresh SearchableSelect instance — mounts).
+  const logCallFor = (contactType, id) => {
+    setPrefillContactValue(`${contactType}:${id}`);
+    setShowLogModal(true);
+  };
   const closeLogModal = () => {
     setShowLogModal(false);
+    setPrefillContactValue("");
     formRef.current?.reset();
   };
 
   const handleSaveCall = async (e) => {
     e.preventDefault();
     const formData = new FormData(formRef.current);
-    const clientId = String(formData.get("clientId") || "");
-    if (!clientId) {
-      addToast({ title: "Client Required", message: "Pick which client this call was with.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
+    // Combined picker's value is "client:<id>" or "lead:<id>" — see
+    // contactOptions below — since company_leads and clients are separate
+    // id spaces and cs_call_log can only be tied to exactly one (see
+    // sql/add_cs_call_log_leads.sql's xor check).
+    const rawContact = String(formData.get("contactId") || "");
+    const [contactType, contactId] = rawContact.includes(":") ? rawContact.split(":") : ["", ""];
+    if (!contactType || !contactId) {
+      addToast({ title: "Contact Required", message: "Pick which client or lead this call was with.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
       return;
     }
-    const matchedClient = payingClients.find((c) => c.id === clientId);
+    const isLead = contactType === "lead";
+    const matchedContact = isLead
+      ? leads.find((l) => l.id === contactId)
+      : payingClients.find((c) => c.id === contactId) || unpaidClients.find((c) => c.id === contactId);
     const nextStepsInput = String(formData.get("nextStepsInput") || "").trim();
 
     const payload = {
-      client_id: clientId,
+      client_id: isLead ? null : contactId,
+      lead_id: isLead ? contactId : null,
       employee_id: user?.id || null,
       called_by_name: String(formData.get("calledBy") || displayName).trim() || displayName,
-      phone: String(formData.get("phone") || matchedClient?.phone || "").trim() || null,
+      phone: String(formData.get("phone") || matchedContact?.phone || "").trim() || null,
       call_date: String(formData.get("callDate") || todayIsoDay()),
       call_time: String(formData.get("callTime") || "") || null,
       outcome: String(formData.get("outcome") || "Called"),
@@ -326,10 +485,14 @@ export default function CsDashboard2() {
 
     setSaving(true);
     try {
-      const { data, error } = await supabase.from("cs_call_log").insert(payload).select("*, clients ( id, full_name, phone, email )").single();
+      const { data, error } = await supabase
+        .from("cs_call_log")
+        .insert(payload)
+        .select("*, clients ( id, full_name, phone, email ), leads:company_leads ( id, full_name, phone, email, computed_status )")
+        .single();
       if (error) throw error;
       setCalls((prev) => [data, ...prev]);
-      addToast({ title: "Call Logged", message: `Call with ${matchedClient?.full_name || "client"} saved.`, variant: "success", icon: "bi-telephone-fill" });
+      addToast({ title: "Call Logged", message: `Call with ${matchedContact?.full_name || "contact"} saved.`, variant: "success", icon: "bi-telephone-fill" });
       closeLogModal();
       setActiveSection("call-log");
       setSelectedCallId(data.id);
@@ -342,9 +505,19 @@ export default function CsDashboard2() {
     }
   };
 
-  const clientOptions = useMemo(
-    () => payingClients.map((c) => ({ value: c.id, label: c.full_name || "Unnamed client" })),
-    [payingClients]
+  // One combined searchable list for the Log Call modal — LTOS paying
+  // clients, unpaid/signup clients, and LTOS leads together, each option's
+  // value prefixed with its type so handleSaveCall above can route it to
+  // client_id or lead_id correctly. Labels are suffixed so reps can tell
+  // apart a paying client, an unpaid signup, and a widget lead who happen
+  // to share a name at a glance.
+  const contactOptions = useMemo(
+    () => [
+      ...payingClients.map((c) => ({ value: `client:${c.id}`, label: `${c.full_name || "Unnamed client"} — Client` })),
+      ...unpaidClients.map((c) => ({ value: `client:${c.id}`, label: `${c.full_name || "Unnamed client"} — Signup (Unpaid)` })),
+      ...leads.map((l) => ({ value: `lead:${l.id}`, label: `${l.full_name || "Unnamed lead"} — Lead` })),
+    ],
+    [payingClients, unpaidClients, leads]
   );
 
   const viewDetails = (record) => {
@@ -531,7 +704,10 @@ export default function CsDashboard2() {
                           <td>
                             <div className="csd2-contact-cell">
                               <div className="csd2-mini-avatar">{initialsFromName(r.name)}</div>
-                              <div className="csd2-name">{r.name}</div>
+                              <div>
+                                <div className="csd2-name">{r.name}</div>
+                                <div className="csd2-subtle">{r.contactType === "lead" ? "Lead" : "Client"}</div>
+                              </div>
                             </div>
                           </td>
                           <td>{r.phone || "—"}</td>
@@ -567,15 +743,25 @@ export default function CsDashboard2() {
                 <button className="csd2-secondary-btn" type="button" onClick={openLogModal}>Log Call</button>
               </div>
               <div className="csd2-card csd2-panel-body">
-                {leadsData.length === 0 ? (
-                  <EmptyState title="No leads yet" message="Leads will appear here after you log calls." />
+                {leadsRows.length === 0 ? (
+                  <EmptyState title="No leads yet" message="Leads from the funding-eligibility widget and unpaid client signups will appear here." />
                 ) : (
                   <table>
-                    <thead><tr><th>LEAD</th><th>PHONE</th><th>STATUS</th><th>SOURCE</th><th>LAST OUTCOME</th><th>OWNER</th></tr></thead>
+                    <thead><tr><th>LEAD</th><th>SOURCE</th><th>PHONE</th><th>EMAIL</th><th>FUNDER STATUS</th><th>LAST OUTCOME</th><th>LAST CALLED</th><th>OWNER</th><th></th></tr></thead>
                     <tbody>
-                      {leadsData.map((r) => (
-                        <tr key={r.id}>
-                          <td>{r.name}</td><td>{r.phone || "—"}</td><td>{r.leadStatus}</td><td>{r.source}</td><td>{r.outcome}</td><td>{r.calledBy}</td>
+                      {leadsRows.map((l) => (
+                        <tr key={l.rowKey}>
+                          <td>{l.name}</td>
+                          <td>{l.source}</td>
+                          <td>{l.phone}</td>
+                          <td>{l.email}</td>
+                          <td>{l.status ? <span className={`csd2-badge ${statusBadgeClass(l.status)}`}>{statusLabel(l.status)}</span> : "—"}</td>
+                          <td>{l.lastOutcome}</td>
+                          <td>{l.lastCallDate}</td>
+                          <td>{l.owner}</td>
+                          <td>
+                            <button className="csd2-secondary-btn" type="button" onClick={() => logCallFor(l.contactType, l.contactId)}>Log Call</button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -670,11 +856,14 @@ export default function CsDashboard2() {
                   <EmptyState title="No paying clients yet" message="Clients appear here once they're marked paid." />
                 ) : (
                   <table>
-                    <thead><tr><th>CLIENT</th><th>PHONE</th><th>LAST OUTCOME</th><th>LAST CALLED</th><th>OWNER</th></tr></thead>
+                    <thead><tr><th>CLIENT</th><th>PHONE</th><th>LAST OUTCOME</th><th>LAST CALLED</th><th>OWNER</th><th></th></tr></thead>
                     <tbody>
                       {clientsRows.map((c) => (
                         <tr key={c.id}>
                           <td>{c.name}</td><td>{c.phone}</td><td>{c.lastOutcome}</td><td>{c.lastCallDate}</td><td>{c.owner}</td>
+                          <td>
+                            <button className="csd2-secondary-btn" type="button" onClick={() => logCallFor("client", c.id)}>Log Call</button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -837,13 +1026,19 @@ export default function CsDashboard2() {
               <form ref={formRef} onSubmit={handleSaveCall}>
                 <div className="csd2-modal-grid">
                   <div className="csd2-field csd2-full">
-                    <label>Client</label>
-                    <SearchableSelect name="clientId" options={clientOptions} placeholder="Search paying clients..." required />
+                    <label>Client or Lead</label>
+                    <SearchableSelect
+                      name="contactId"
+                      options={contactOptions}
+                      placeholder="Search LTOS clients and leads..."
+                      required
+                      defaultValue={prefillContactValue}
+                    />
                   </div>
 
                   <div className="csd2-field">
                     <label htmlFor="csd2Phone">Phone</label>
-                    <input id="csd2Phone" name="phone" type="text" placeholder="Defaults to client's phone on file" />
+                    <input id="csd2Phone" name="phone" type="text" placeholder="Defaults to contact's phone on file" />
                   </div>
 
                   <div className="csd2-field">

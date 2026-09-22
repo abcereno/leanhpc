@@ -92,3 +92,31 @@ export function getCaseManagementCountdown(client) {
   const daysLeft = CASE_MANAGEMENT_COUNTDOWN_DAYS - elapsedDays;
   return { daysLeft, isOverdue: daysLeft < 0 };
 }
+
+/**
+ * "Payment Due" reminder — same {daysLeft, isOverdue} shape as
+ * getCaseManagementCountdown above (so both reminder types can share one
+ * badge component wherever they're shown), but built off a plain, manually
+ * set date (`clients.next_payment_due_at`, see sql/add_next_payment_due.sql)
+ * instead of a fixed 30-day cycle. There's no recurring/subscription
+ * billing schema in this app to derive a due date from, so this is staff
+ * setting "remind me on X" by hand — ClientHeader.jsx's Status dropdown and
+ * AdminClientList.jsx both expose a small date picker for it
+ * (useClientActions.js#setNextPaymentDue / useAdminClients.js
+ * #handleSetNextPaymentDue).
+ *
+ * Returns null if next_payment_due_at isn't set — a client with no due
+ * date on file just shows no badge, not a false "0 days left."
+ */
+export function getPaymentDueStatus(client) {
+  const due = client?.next_payment_due_at;
+  if (!due) return null;
+  const dueDate = new Date(due);
+  if (Number.isNaN(dueDate.getTime())) return null;
+  // Ceil, not floor — "due today" (a due date of today's calendar date)
+  // should read as 0 days left, not -1, and a due date later today should
+  // still read as "due today" rather than "1 day left" just because a few
+  // hours haven't elapsed yet.
+  const daysLeft = Math.ceil((dueDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+  return { daysLeft, isOverdue: daysLeft < 0 };
+}

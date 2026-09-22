@@ -269,6 +269,29 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
   const setProcessingStage = (stageId) =>
     update({ processing_stage: stageId || null, processing_stage_updated_at: new Date().toISOString() }, null, true);
 
+  // Manually-set "remind me to collect payment on this date" — see
+  // sql/add_next_payment_due.sql's header comment for why this is a plain
+  // staff-set date rather than something derived from a billing cycle.
+  // `isoDateOrNull` is a "YYYY-MM-DD" date string, or null to clear it.
+  const setNextPaymentDue = (isoDateOrNull) =>
+    update(
+      { next_payment_due_at: isoDateOrNull },
+      isoDateOrNull ? "Next payment due date set." : "Payment due date cleared.",
+      true
+    );
+
+  // Billing & Payment Plan panel (ClientBillingPanel.jsx / sql/add_payment_plan.sql)
+  // — sets the plain staff-tracked plan fields plus the shared
+  // next_payment_due_at reminder, all from one modal (EditPaymentPlanModal.jsx).
+  // Doesn't touch what's actually been paid — that's derived read-only from
+  // the `incomes` table (see utils/clientPayments.js), never written here.
+  const setPaymentPlan = ({ total_amount_due, payment_plan_installments, payment_plan_amount, next_payment_due_at }) =>
+    update(
+      { total_amount_due, payment_plan_installments, payment_plan_amount, next_payment_due_at },
+      "Billing info updated.",
+      true
+    );
+
   // Creates a brand-new `clients` row for a returning client who needs
   // another round — same reasoning/tooling as the 6 "add client" forms
   // (see utils/clientDuplicateRound.js's header comment), just triggered
@@ -342,6 +365,8 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
     markBureauComplete, markBureauNA,
     markServiceComplete,
     setProcessingStage,
+    setNextPaymentDue,
+    setPaymentPlan,
     startNewRound,
   };
 }

@@ -63,6 +63,7 @@ export const CLIENT_SUMMARY_SELECT = `
   admin_id, company_id, affiliate_id, agent, progress, status_stage,
   is_paused, paused_at, paused_days_total,
   processing_duration, tu_eq_docs_submitted_at, last_report_update_at,
+  next_payment_due_at,
   approved_exp_count, approved_tu_count, approved_eq_count,
   processing_stage, processing_stage_updated_at,
   company_tasks ( id, is_completed )
@@ -215,6 +216,20 @@ export async function fetchEnrichedClients() {
   if (baseErr && /processing_stage/i.test(baseErr.message || "")) {
     console.warn("clients.processing_stage not found (run sql/add_processing_stage.sql) — falling back without it.");
     selectedFields = selectedFields.replace(/processing_stage, processing_stage_updated_at,\s*/, "");
+    ({ data: baseRows, error: baseErr } = await fetchAllRows("clients", {
+      select: selectedFields,
+      order: "created_at",
+      ascending: false,
+    }));
+  }
+
+  // sql/add_next_payment_due.sql may not have been run yet either — same
+  // independent defensive fallback (getPaymentDueStatus already returns
+  // null when this field is missing, so ClientCardGrid.jsx's badge simply
+  // doesn't render for anyone until the migration runs).
+  if (baseErr && /next_payment_due_at/i.test(baseErr.message || "")) {
+    console.warn("clients.next_payment_due_at not found (run sql/add_next_payment_due.sql) — falling back without it.");
+    selectedFields = selectedFields.replace(/next_payment_due_at,\s*/, "");
     ({ data: baseRows, error: baseErr } = await fetchAllRows("clients", {
       select: selectedFields,
       order: "created_at",

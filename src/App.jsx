@@ -12,6 +12,7 @@ import ConfirmProvider from "./components/shared/ui/ConfirmDialog";
 import AdminServiceOrders from "./components/admin/AdminServiceOrders";
 import CountReviewQueue from "./components/admin/CountReviewQueue";
 import AiReviewQueue from "./components/admin/AiReviewQueue";
+import AiTrainingChat from "./components/admin/AiTrainingChat";
 // Layouts & Guards
 import AdminLayout from "./components/admin/AdminLayout";
 import MainLayout from "./components/shared/layout/MainLayout";
@@ -269,6 +270,10 @@ function AppRoutes() {
 
             <Route element={<PermissionGuard permissions={['review_ai_flags']} />}>
               <Route path="/ai-review-queue" element={<AiReviewQueue />} />
+            </Route>
+
+            <Route element={<PermissionGuard permissions={['train_ai_rules']} />}>
+              <Route path="/ai-training-chat" element={<AiTrainingChat />} />
             </Route>
 
             {/* Setting your own display name — no specific capability

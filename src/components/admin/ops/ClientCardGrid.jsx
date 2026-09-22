@@ -1,6 +1,6 @@
 import { Badge, Card, Col, Row } from "react-bootstrap";
 import { Link } from "react-router-dom";
-import { getAgingBucket, getCaseManagementCountdown } from "../../../utils/aging";
+import { getAgingBucket, getCaseManagementCountdown, getPaymentDueStatus } from "../../../utils/aging";
 import { resolveServiceId } from "../../../utils/services";
 import { STAGE_BADGE_STYLE, OVERDUE_DARK_HEX } from "../../../utils/workflowStage";
 
@@ -131,6 +131,7 @@ export default function ClientCardGrid({ clients, loading, emptyMessage = "No cl
         const bucket = getAgingBucket(c.agingDaysCurrent);
         const isCaseManagement = resolveServiceId(c) === "credit_repair";
         const countdown = isCaseManagement && c.is_paid ? getCaseManagementCountdown(c) : null;
+        const paymentDue = getPaymentDueStatus(c);
         return (
           <Col key={c.id} xs={12} sm={6} lg={4} xl={3}>
             <Card
@@ -210,6 +211,19 @@ export default function ClientCardGrid({ clients, loading, emptyMessage = "No cl
                       title={c.last_report_update_at ? "Case Management check-in countdown, from last report update" : "Case Management check-in countdown, from paid date (no report update yet)"}
                     >
                       {countdown.isOverdue ? `OVERDUE ${Math.abs(countdown.daysLeft)}d` : `${countdown.daysLeft}d LEFT`}
+                    </Badge>
+                  )}
+                  {/* Manually-set reminder date (sql/add_next_payment_due.sql)
+                      — not service-gated like the countdown above, since
+                      it's not tied to any particular workflow. */}
+                  {paymentDue && (
+                    <Badge
+                      bg={paymentDue.isOverdue ? "danger" : "info"}
+                      style={{ fontSize: "0.65rem" }}
+                      title={`Payment due ${new Date(c.next_payment_due_at + "T00:00:00").toLocaleDateString()}`}
+                    >
+                      <i className="bi bi-cash-coin me-1"></i>
+                      {paymentDue.isOverdue ? `PMT OVERDUE ${Math.abs(paymentDue.daysLeft)}d` : `PMT DUE ${paymentDue.daysLeft}d`}
                     </Badge>
                   )}
                 </div>

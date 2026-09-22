@@ -261,6 +261,29 @@ function buildDealershipNote(lenderAliases: any[]): string {
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------
+// CLASSIFICATION RULES (sql/add_classification_rules.sql) — standing
+// rules an admin taught via the AI Training Chat page
+// (src/components/admin/AiTrainingChat.jsx), fetched client-side by
+// src/utils/classifyInquiries.js#fetchClassificationRules and forwarded
+// here as `classificationRules`: already filtered to just the rows that
+// apply to THIS request (every global rule, plus any rule scoped to this
+// specific client). Same "prompt guidance, not a deterministic guard"
+// posture as the alias/manual-review/dealership blocks above — there's no
+// force-override layer for these yet (see that migration's header
+// comment), so a rule is only as reliable as the model's own compliance
+// with it.
+// ---------------------------------------------------------------------
+
+function buildRulesPromptBlock(classificationRules: any[]): string {
+  if (!Array.isArray(classificationRules) || classificationRules.length === 0) return '';
+  const lines = classificationRules
+    .filter((r) => r?.rule_text)
+    .map((r) => `- ${r.rule_text}${r.action ? ` (intended outcome: ${r.action})` : ''}`);
+  if (!lines.length) return '';
+  return `Standing rules an admin has taught for this classifier — follow these as override instructions, even where they conflict with the general rules above:\n${lines.join('\n')}`;
+}
+
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response(null, {
     headers
@@ -272,7 +295,7 @@ serve(async (req)=>{
     headers
   });
   try {
-    const { accounts, experian = [], transunion = [], equifax = [], lenderAliases = [] } = await req.json();
+    const { accounts, experian = [], transunion = [], equifax = [], lenderAliases = [], classificationRules = [] } = await req.json();
     if (!accounts || !Array.isArray(accounts)) throw new Error('Invalid or missing accounts array');
     const openaiKey = Deno.env.get('OPENAI_KEY');
     if (!openaiKey) throw new Error('Missing OpenAI key');
@@ -281,6 +304,7 @@ serve(async (req)=>{
     const aliasBlock = buildAliasPromptBlock(lenderAliases);
     const manualReviewNote = buildManualReviewNote(lenderAliases);
     const dealershipNote = buildDealershipNote(lenderAliases);
+    const rulesBlock = buildRulesPromptBlock(classificationRules);
 
     const prompt = `
 Classify each inquiry per bureau separately using the rules below. Output the same number of inquiries as received, classified under one of: "linked", "associated", or "non-linked".
@@ -307,6 +331,7 @@ Classify each inquiry per bureau separately using the rules below. Output the sa
 ${aliasBlock ? `\nLender reference list — each line is one real-world lender followed by every abbreviation/variant seen on actual bureau reports. Treat any inquiry or account name matching one of these variants as referring to that lender, even if the raw text looks completely different from the canonical name:\n${aliasBlock}\n` : ''}
 ${dealershipNote ? `\nDealership-to-finance-company relationships:\n${dealershipNote}\n` : ''}
 ${manualReviewNote ? `\n${manualReviewNote}\n` : ''}
+${rulesBlock ? `\n${rulesBlock}\n` : ''}
 Make sure:
 - No linked classification is used unless creditor names match (directly, via the lender reference list, or via a dealership relationship above) AND the account opened on or after the inquiry, within the type-specific window above
 - Only Experian can have associated inquiries

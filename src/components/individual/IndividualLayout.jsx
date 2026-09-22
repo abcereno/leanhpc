@@ -7,6 +7,7 @@ import { useClient } from "../../hooks/useClient";
 import { useClientCreditFiles } from "../../hooks/useClientCreditFiles";
 import { deriveServiceId } from "../../utils/services";
 import { markClientPaid } from "../../utils/markClientPaid";
+import { LTOS_COMPANY_ID } from "../../utils/companies";
 
 import { Joyride, STATUS } from 'react-joyride';
 
@@ -73,7 +74,15 @@ export default function IndividualLayout() {
                 service_id: deriveServiceId('inquiry deletion'),
                 status: 'active',
                 is_paid: false,
-                auth_user_id: user.id
+                auth_user_id: user.id,
+                // This is a second, independent self-heal path from the one in
+                // IndividualDashboard.jsx (this Layout mounts alongside its
+                // routed child on first load, and either one's insert can win
+                // the race) — both must set company_id or an individual signup
+                // can still end up without one depending on which query lands
+                // first. See sql/add_individual_signup_company.sql for the
+                // primary fix (the handle_new_user() DB trigger).
+                company_id: LTOS_COMPANY_ID,
             };
             let { data: newClient, error: newClientErr } = await supabase.from("clients").insert(newClientPayload).select("id").single();
             // Defensive: sql/add_services.sql may not have been run yet — degrade
