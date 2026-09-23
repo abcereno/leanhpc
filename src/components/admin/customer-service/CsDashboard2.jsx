@@ -199,6 +199,30 @@ function EmptyState({ title, message }) {
   );
 }
 
+// Runs a `clients`/`company_leads` select tolerant of optional columns whose
+// migration hasn't been run yet (total_amount_due from sql/add_payment_plan.sql,
+// referral_partner_id from sql/add_referral_partners.sql, invoice_sent_at from
+// sql/add_invoice_sent_tracking.sql — each landed independently, so any subset
+// of them can be missing on a given database). Rather than hard-coding a
+// per-column fallback for every optional field this dashboard reads, this
+// strips whichever column PostgREST reports missing and retries, one column
+// at a time, until the query succeeds or every optional column is exhausted.
+// `applyFilters` chains .eq()/.order() etc. onto the base select.
+async function selectResilient(table, columns, applyFilters) {
+  let cols = [...columns];
+  for (let attempt = 0; attempt < columns.length + 1; attempt++) {
+    const { data, error } = await applyFilters(supabase.from(table).select(cols.join(", ")));
+    if (!error) return { data: data || [], missingColumns: columns.filter((c) => !cols.includes(c)) };
+    const match = /column .*\.(\w+) does not exist/i.exec(error.message || "");
+    if (match && cols.includes(match[1])) {
+      cols = cols.filter((c) => c !== match[1]);
+      continue;
+    }
+    throw error;
+  }
+  throw new Error(`Could not load ${table}: too many missing columns`);
+}
+
 export default function CsDashboard2() {
   const { user, fullName } = useAuth();
   const { addToast } = useToast();
@@ -252,7 +276,7 @@ export default function CsDashboard2() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [callsRes, clientsRes, leadsRes, partnersRes] = await Promise.all([
+      const [callsRes, clientsResult, leadsResult, partnersRes] = await Promise.all([
         supabase
           .from("cs_call_log")
           // `leads:` aliases the company_leads embed so it doesn't collide
@@ -265,17 +289,18 @@ export default function CsDashboard2() {
         // "what counts as an LTOS client" defined in exactly one place.
         // Also pulls in everything the File Status pipeline needs
         // (utils/fileReadiness.js) so that view doesn't need its own
-        // separate client fetch.
-        supabase
-          .from("clients")
-          .select("id, full_name, phone, email, is_paid, invoice_sent_at, admin_id, total_amount_due, referral_partner_id, created_at")
-          .eq("company_id", LTOS_COMPANY_ID)
-          .order("full_name", { ascending: true }),
-        supabase
-          .from("company_leads")
-          .select("id, full_name, phone, email, monitoring_username, computed_status, company_id, referral_partner_id, created_at")
-          .eq("company_id", LTOS_COMPANY_ID)
-          .order("created_at", { ascending: false }),
+        // separate client fetch. total_amount_due/referral_partner_id are
+        // each from their own optional migration — see selectResilient().
+        selectResilient(
+          "clients",
+          ["id", "full_name", "phone", "email", "is_paid", "invoice_sent_at", "admin_id", "total_amount_due", "referral_partner_id", "created_at"],
+          (q) => q.eq("company_id", LTOS_COMPANY_ID).order("full_name", { ascending: true })
+        ),
+        selectResilient(
+          "company_leads",
+          ["id", "full_name", "phone", "email", "monitoring_username", "computed_status", "company_id", "referral_partner_id", "created_at"],
+          (q) => q.eq("company_id", LTOS_COMPANY_ID).order("created_at", { ascending: false })
+        ),
         supabase
           .from("referral_partners")
           .select("id, name, active")
@@ -300,38 +325,11 @@ export default function CsDashboard2() {
         setMigrationMissing(false);
       }
 
-      // sql/add_referral_partners.sql may not be run yet — its
-      // referral_partner_id column on clients/company_leads and the
-      // referral_partners table itself are both optional additions, so
-      // fail soft on just that piece rather than the whole dashboard.
-      const referralMigrationMissing = /referral_partner/i.test(
-        clientsRes.error?.message || leadsRes.error?.message || partnersRes.error?.message || ""
-      );
-
-      if (clientsRes.error && !referralMigrationMissing) throw clientsRes.error;
-      const allLtosClients = clientsRes.error
-        ? (
-            await supabase
-              .from("clients")
-              .select("id, full_name, phone, email, is_paid, invoice_sent_at, admin_id, total_amount_due, created_at")
-              .eq("company_id", LTOS_COMPANY_ID)
-              .order("full_name", { ascending: true })
-          ).data || []
-        : clientsRes.data || [];
+      const allLtosClients = clientsResult.data;
       setPayingClients(allLtosClients.filter((c) => c.is_paid));
       setUnpaidClients(allLtosClients.filter((c) => !c.is_paid));
 
-      if (leadsRes.error && !referralMigrationMissing) throw leadsRes.error;
-      const allLeads = leadsRes.error
-        ? (
-            await supabase
-              .from("company_leads")
-              .select("id, full_name, phone, email, monitoring_username, computed_status, company_id, created_at")
-              .eq("company_id", LTOS_COMPANY_ID)
-              .order("created_at", { ascending: false })
-          ).data || []
-        : leadsRes.data || [];
-      setLeads(allLeads);
+      setLeads(leadsResult.data);
 
       setReferralPartners(partnersRes.error ? [] : partnersRes.data || []);
 
