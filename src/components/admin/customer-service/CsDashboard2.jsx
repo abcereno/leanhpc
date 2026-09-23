@@ -61,9 +61,46 @@ import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../shared/ui/ToastNotifier";
 import SearchableSelect from "../../shared/ui/SearchableSelect";
 import { LTOS_COMPANY_ID } from "../../../utils/companies";
+import { deriveServiceId } from "../../../utils/services";
+import {
+  fetchIdentityDocsForClients,
+  computeIdentityStatus,
+  computePaymentStatus,
+  computeFileBucket,
+} from "../../../utils/fileReadiness";
 import "./CsDashboard2.css";
 
 const OUTCOMES = ["Interested", "Follow Up", "Called", "Not Interested", "Appointment Set"];
+
+// File Status sub-tabs — see utils/fileReadiness.js#computeFileBucket for
+// exactly how a client lands in one of these.
+const FILE_STATUS_TABS = [
+  { key: "new_leads", label: "New Leads" },
+  { key: "missing_docs", label: "Missing Docs" },
+  { key: "payment_pending", label: "Payment Pending" },
+  { key: "ready", label: "Ready for Roselle" },
+];
+
+function docStatusLabel(status) {
+  if (status === "verified") return "Verified";
+  if (status === "uploaded") return "Uploaded";
+  return "Missing";
+}
+function docStatusClass(status) {
+  if (status === "verified") return "csd2-status-green";
+  if (status === "uploaded") return "csd2-status-yellow";
+  return "csd2-status-red";
+}
+function paymentStatusLabel(status) {
+  if (status === "verified") return "Verified";
+  if (status === "pending") return "Pending";
+  return "Not sent";
+}
+function paymentStatusClass(status) {
+  if (status === "verified") return "csd2-status-green";
+  if (status === "pending") return "csd2-status-yellow";
+  return "csd2-status-unknown";
+}
 
 // See the file header comment — every query in this dashboard is scoped
 // to this one company (src/utils/companies.js#LTOS_COMPANY_ID).
@@ -72,6 +109,7 @@ const NAV_ITEMS = [
   { key: "dashboard", icon: "🏠", label: "Dashboard" },
   { key: "call-log", icon: "📞", label: "Call Log" },
   { key: "leads", icon: "👤", label: "Leads" },
+  { key: "file-status", icon: "📁", label: "File Status" },
   { key: "follow-ups", icon: "🗓️", label: "Follow Ups" },
   { key: "tasks", icon: "✅", label: "Tasks" },
   { key: "calendar", icon: "📅", label: "Calendar" },
@@ -175,8 +213,22 @@ export default function CsDashboard2() {
   // since they haven't converted to paying clients yet.
   const [unpaidClients, setUnpaidClients] = useState([]);
   const [leads, setLeads] = useState([]);
+  // Admin-managed list backing both the Leads "Source" picker and File
+  // Status's Source column — see sql/add_referral_partners.sql.
+  const [referralPartners, setReferralPartners] = useState([]);
+  // clientId -> { license, poa } client_documents rows — the File Status
+  // readiness pipeline's document half (see utils/fileReadiness.js).
+  const [identityDocsByClient, setIdentityDocsByClient] = useState(new Map());
+  // adminId -> full_name, for the File Status "Assigned To" column.
+  const [adminNamesById, setAdminNamesById] = useState(new Map());
   const [activeSection, setActiveSection] = useState("call-log");
+  const [activeFileStatusTab, setActiveFileStatusTab] = useState("new_leads");
   const [saving, setSaving] = useState(false);
+  const [sendingInvoiceFor, setSendingInvoiceFor] = useState(null);
+
+  const [showAddLeadModal, setShowAddLeadModal] = useState(false);
+  const [showOnboardClientModal, setShowOnboardClientModal] = useState(false);
+  const [showOnboardPartnerModal, setShowOnboardPartnerModal] = useState(false);
 
   const [selectedCallId, setSelectedCallId] = useState(null);
   const [activeDetailTab, setActiveDetailTab] = useState("details");
@@ -200,7 +252,7 @@ export default function CsDashboard2() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [callsRes, clientsRes, leadsRes] = await Promise.all([
+      const [callsRes, clientsRes, leadsRes, partnersRes] = await Promise.all([
         supabase
           .from("cs_call_log")
           // `leads:` aliases the company_leads embed so it doesn't collide
@@ -211,16 +263,24 @@ export default function CsDashboard2() {
         // One query for every LTOS client, split client-side into paid vs
         // unpaid below — cheaper than two separate round trips and keeps
         // "what counts as an LTOS client" defined in exactly one place.
+        // Also pulls in everything the File Status pipeline needs
+        // (utils/fileReadiness.js) so that view doesn't need its own
+        // separate client fetch.
         supabase
           .from("clients")
-          .select("id, full_name, phone, email, is_paid")
+          .select("id, full_name, phone, email, is_paid, invoice_sent_at, admin_id, total_amount_due, referral_partner_id, created_at")
           .eq("company_id", LTOS_COMPANY_ID)
           .order("full_name", { ascending: true }),
         supabase
           .from("company_leads")
-          .select("id, full_name, phone, email, monitoring_username, computed_status, company_id, created_at")
+          .select("id, full_name, phone, email, monitoring_username, computed_status, company_id, referral_partner_id, created_at")
           .eq("company_id", LTOS_COMPANY_ID)
           .order("created_at", { ascending: false }),
+        supabase
+          .from("referral_partners")
+          .select("id, name, active")
+          .eq("company_id", LTOS_COMPANY_ID)
+          .order("name", { ascending: true }),
       ]);
 
       if (callsRes.error) {
@@ -240,13 +300,54 @@ export default function CsDashboard2() {
         setMigrationMissing(false);
       }
 
-      if (clientsRes.error) throw clientsRes.error;
-      const allLtosClients = clientsRes.data || [];
+      // sql/add_referral_partners.sql may not be run yet — its
+      // referral_partner_id column on clients/company_leads and the
+      // referral_partners table itself are both optional additions, so
+      // fail soft on just that piece rather than the whole dashboard.
+      const referralMigrationMissing = /referral_partner/i.test(
+        clientsRes.error?.message || leadsRes.error?.message || partnersRes.error?.message || ""
+      );
+
+      if (clientsRes.error && !referralMigrationMissing) throw clientsRes.error;
+      const allLtosClients = clientsRes.error
+        ? (
+            await supabase
+              .from("clients")
+              .select("id, full_name, phone, email, is_paid, invoice_sent_at, admin_id, total_amount_due, created_at")
+              .eq("company_id", LTOS_COMPANY_ID)
+              .order("full_name", { ascending: true })
+          ).data || []
+        : clientsRes.data || [];
       setPayingClients(allLtosClients.filter((c) => c.is_paid));
       setUnpaidClients(allLtosClients.filter((c) => !c.is_paid));
 
-      if (leadsRes.error) throw leadsRes.error;
-      setLeads(leadsRes.data || []);
+      if (leadsRes.error && !referralMigrationMissing) throw leadsRes.error;
+      const allLeads = leadsRes.error
+        ? (
+            await supabase
+              .from("company_leads")
+              .select("id, full_name, phone, email, monitoring_username, computed_status, company_id, created_at")
+              .eq("company_id", LTOS_COMPANY_ID)
+              .order("created_at", { ascending: false })
+          ).data || []
+        : leadsRes.data || [];
+      setLeads(allLeads);
+
+      setReferralPartners(partnersRes.error ? [] : partnersRes.data || []);
+
+      // File Status doc statuses + Assigned To names — every LTOS client
+      // regardless of paid/unpaid, since either can be mid-pipeline.
+      const allClientIds = allLtosClients.map((c) => c.id);
+      const docsMap = await fetchIdentityDocsForClients(allClientIds);
+      setIdentityDocsByClient(docsMap);
+
+      const adminIds = Array.from(new Set(allLtosClients.map((c) => c.admin_id).filter(Boolean)));
+      if (adminIds.length > 0) {
+        const { data: adminRows } = await supabase.from("profiles").select("id, full_name").in("id", adminIds);
+        setAdminNamesById(new Map((adminRows || []).map((a) => [a.id, a.full_name])));
+      } else {
+        setAdminNamesById(new Map());
+      }
     } catch (err) {
       console.error("CsDashboard2 load error:", err);
       addToast({ title: "Load Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
@@ -428,6 +529,53 @@ export default function CsDashboard2() {
 
     return [...widgetRows, ...signupRows].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }, [leads, unpaidClients, records, latestByClientId]);
+  const referralPartnerNameById = useMemo(
+    () => new Map(referralPartners.map((p) => [p.id, p.name])),
+    [referralPartners]
+  );
+
+  // The File Status readiness pipeline — every LTOS client (paid or
+  // unpaid), each with its computed doc/payment status and which of the
+  // four tabs it belongs in. See utils/fileReadiness.js for the actual
+  // bucketing rule (docs before payment, matching the reviewed reference
+  // design's own observed behavior).
+  const fileStatusRows = useMemo(() => {
+    const allClients = [...payingClients, ...unpaidClients];
+    return allClients
+      .map((c) => {
+        const docs = identityDocsByClient.get(c.id) || {};
+        const idStatus = computeIdentityStatus(docs.license);
+        const addressStatus = computeIdentityStatus(docs.poa);
+        const paymentStatus = computePaymentStatus(c);
+        const bucket = computeFileBucket({ idStatus, addressStatus, paymentStatus });
+        return {
+          id: c.id,
+          name: c.full_name || "Unnamed client",
+          phone: c.phone || "—",
+          source: referralPartnerNameById.get(c.referral_partner_id) || "Direct",
+          idStatus,
+          addressStatus,
+          paymentStatus,
+          invoiceSentAt: c.invoice_sent_at,
+          rate: c.total_amount_due ? `$${Number(c.total_amount_due).toLocaleString()}` : "—",
+          assignedTo: adminNamesById.get(c.admin_id) || "—",
+          bucket,
+        };
+      })
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }, [payingClients, unpaidClients, identityDocsByClient, referralPartnerNameById, adminNamesById]);
+
+  const fileStatusCounts = useMemo(() => {
+    const counts = { new_leads: 0, missing_docs: 0, payment_pending: 0, ready: 0 };
+    fileStatusRows.forEach((r) => { counts[r.bucket] = (counts[r.bucket] || 0) + 1; });
+    return counts;
+  }, [fileStatusRows]);
+
+  const fileStatusVisibleRows = useMemo(
+    () => (activeFileStatusTab === "all" ? fileStatusRows : fileStatusRows.filter((r) => r.bucket === activeFileStatusTab)),
+    [fileStatusRows, activeFileStatusTab]
+  );
+
   const outcomeGroups = useMemo(() => groupCounts(records, (r) => r.outcome), [records]);
   const callerGroups = useMemo(() => groupCounts(records, (r) => r.calledBy), [records]);
 
@@ -519,6 +667,146 @@ export default function CsDashboard2() {
     ],
     [payingClients, unpaidClients, leads]
   );
+
+  // CS sends the invoice themselves — this is the one write action they
+  // take on a File Status row directly (the doc checklist is read-only,
+  // reflecting the real Alignment Check system elsewhere — see this
+  // dashboard's own file header and utils/fileReadiness.js). Refetches
+  // afterward rather than patching state locally — this company's client
+  // list is small enough that a full reload is simpler and less
+  // error-prone than hand-merging invoice_sent_at into two arrays.
+  const sendInvoice = async (clientId) => {
+    setSendingInvoiceFor(clientId);
+    try {
+      const { error } = await supabase.from("clients").update({ invoice_sent_at: new Date().toISOString() }).eq("id", clientId);
+      if (error) throw error;
+      addToast({ title: "Invoice Marked Sent", message: "Payment status is now Pending.", variant: "success", icon: "bi-receipt" });
+      await loadData();
+    } catch (err) {
+      console.error("Send invoice failed:", err);
+      addToast({ title: "Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+    } finally {
+      setSendingInvoiceFor(null);
+    }
+  };
+
+  const addLeadFormRef = useRef(null);
+  const closeAddLeadModal = () => { setShowAddLeadModal(false); addLeadFormRef.current?.reset(); };
+  const handleSaveLead = async (e) => {
+    e.preventDefault();
+    const formData = new FormData(addLeadFormRef.current);
+    const fullName = String(formData.get("fullName") || "").trim();
+    if (!fullName) {
+      addToast({ title: "Name Required", message: "Enter the lead's name.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        company_id: LTOS_COMPANY_ID,
+        full_name: fullName,
+        phone: String(formData.get("phone") || "").trim() || null,
+        email: String(formData.get("email") || "").trim() || null,
+        referral_partner_id: String(formData.get("referralPartnerId") || "") || null,
+      };
+      const { error } = await supabase.from("company_leads").insert(payload);
+      if (error) throw error;
+      addToast({ title: "Lead Added", message: `${fullName} added to New Leads.`, variant: "success", icon: "bi-person-plus-fill" });
+      closeAddLeadModal();
+      setActiveSection("leads");
+      await loadData();
+    } catch (err) {
+      console.error("Add lead failed:", err);
+      addToast({ title: "Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // --- Onboard Client wizard: Step 1 (contact + source), Step 2 (review
+  // + create). Creates a clients row directly, same payload shape as the
+  // individual-portal self-heal insert (IndividualDashboard.jsx /
+  // IndividualLayout.jsx) — unpaid, LTOS, inquiry_deletion by default —
+  // since this is staff manually starting a file for someone who called
+  // in rather than signing up themselves.
+  const [onboardClientStep, setOnboardClientStep] = useState(1);
+  const [onboardClientData, setOnboardClientData] = useState({ fullName: "", email: "", phone: "", referralPartnerId: "" });
+  const closeOnboardClientModal = () => {
+    setShowOnboardClientModal(false);
+    setOnboardClientStep(1);
+    setOnboardClientData({ fullName: "", email: "", phone: "", referralPartnerId: "" });
+  };
+  const submitOnboardClient = async () => {
+    if (!onboardClientData.fullName.trim()) {
+      addToast({ title: "Name Required", message: "Enter the client's name.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
+      setOnboardClientStep(1);
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        full_name: onboardClientData.fullName.trim(),
+        email: onboardClientData.email.trim() || null,
+        phone: onboardClientData.phone.trim() || null,
+        dispute_method: "inquiry deletion",
+        service_id: deriveServiceId("inquiry deletion"),
+        status: "pending",
+        is_paid: false,
+        company_id: LTOS_COMPANY_ID,
+        referral_partner_id: onboardClientData.referralPartnerId || null,
+      };
+      let { error } = await supabase.from("clients").insert(payload);
+      // Defensive: sql/add_services.sql may not be run yet — same
+      // graceful-degrade pattern IndividualDashboard.jsx already uses.
+      if (error && /service_id/i.test(error.message || "")) {
+        const { service_id: _omit, ...withoutServiceId } = payload;
+        ({ error } = await supabase.from("clients").insert(withoutServiceId));
+      }
+      if (error) throw error;
+      addToast({ title: "Client Onboarded", message: `${payload.full_name} added as an unpaid client.`, variant: "success", icon: "bi-person-check-fill" });
+      closeOnboardClientModal();
+      setActiveSection("file-status");
+      setActiveFileStatusTab("new_leads");
+      await loadData();
+    } catch (err) {
+      console.error("Onboard client failed:", err);
+      addToast({ title: "Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // --- Onboard Partner wizard: Step 1 (name), Step 2 (confirm) — adds a
+  // row to the referral_partners list (sql/add_referral_partners.sql)
+  // that then shows up in every Source picker across this dashboard.
+  const [onboardPartnerStep, setOnboardPartnerStep] = useState(1);
+  const [onboardPartnerName, setOnboardPartnerName] = useState("");
+  const closeOnboardPartnerModal = () => {
+    setShowOnboardPartnerModal(false);
+    setOnboardPartnerStep(1);
+    setOnboardPartnerName("");
+  };
+  const submitOnboardPartner = async () => {
+    const name = onboardPartnerName.trim();
+    if (!name) {
+      addToast({ title: "Name Required", message: "Enter the partner's name.", variant: "warning", icon: "bi-exclamation-triangle-fill" });
+      setOnboardPartnerStep(1);
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("referral_partners").insert({ company_id: LTOS_COMPANY_ID, name });
+      if (error) throw error;
+      addToast({ title: "Partner Added", message: `${name} is now available as a lead source.`, variant: "success", icon: "bi-diagram-3-fill" });
+      closeOnboardPartnerModal();
+      await loadData();
+    } catch (err) {
+      console.error("Onboard partner failed:", err);
+      addToast({ title: "Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const viewDetails = (record) => {
     setSelectedCallId(record.id);
@@ -761,6 +1049,74 @@ export default function CsDashboard2() {
                           <td>{l.owner}</td>
                           <td>
                             <button className="csd2-secondary-btn" type="button" onClick={() => logCallFor(l.contactType, l.contactId)}>Log Call</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
+          )}
+
+          {activeSection === "file-status" && (
+            <section>
+              <div className="csd2-topbar">
+                <div>
+                  <h2 className="csd2-section-title" style={{ margin: 0 }}>File Status</h2>
+                  <p className="csd2-subtle" style={{ margin: 0 }}>Identity docs, payment, and readiness for every LTOS file.</p>
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button className="csd2-secondary-btn" type="button" onClick={() => setShowOnboardPartnerModal(true)}>＋ Onboard Partner</button>
+                  <button className="csd2-secondary-btn" type="button" onClick={() => setShowAddLeadModal(true)}>＋ Add Lead</button>
+                  <button className="csd2-primary-btn" type="button" onClick={() => setShowOnboardClientModal(true)}>＋ Onboard Client</button>
+                </div>
+              </div>
+
+              <div className="csd2-tabs">
+                {FILE_STATUS_TABS.map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    className={`csd2-tab ${activeFileStatusTab === t.key ? "csd2-active" : ""}`}
+                    onClick={() => setActiveFileStatusTab(t.key)}
+                  >
+                    {t.label} <span className="csd2-badge csd2-status-unknown">{fileStatusCounts[t.key] || 0}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="csd2-card csd2-panel-body">
+                {fileStatusVisibleRows.length === 0 ? (
+                  <EmptyState title="Nothing here" message="No files in this stage right now." />
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>CLIENT</th><th>SOURCE</th><th>ID</th><th>ADDRESS</th><th>PAYMENT</th><th>RATE</th><th>ASSIGNED TO</th><th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fileStatusVisibleRows.map((r) => (
+                        <tr key={r.id}>
+                          <td>
+                            {r.name}
+                            <div className="csd2-list-item-sub">{r.phone}</div>
+                          </td>
+                          <td>{r.source}</td>
+                          <td><span className={`csd2-badge ${docStatusClass(r.idStatus)}`}>{docStatusLabel(r.idStatus)}</span></td>
+                          <td><span className={`csd2-badge ${docStatusClass(r.addressStatus)}`}>{docStatusLabel(r.addressStatus)}</span></td>
+                          <td><span className={`csd2-badge ${paymentStatusClass(r.paymentStatus)}`}>{paymentStatusLabel(r.paymentStatus)}</span></td>
+                          <td>{r.rate}</td>
+                          <td>{r.assignedTo}</td>
+                          <td>
+                            {r.paymentStatus === "not_sent" ? (
+                              <button className="csd2-secondary-btn" type="button" disabled={sendingInvoiceFor === r.id} onClick={() => sendInvoice(r.id)}>
+                                {sendingInvoiceFor === r.id ? "Sending..." : "Send Invoice"}
+                              </button>
+                            ) : (
+                              <span className="csd2-subtle">{r.paymentStatus === "pending" ? "Invoice sent" : "—"}</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1099,6 +1455,169 @@ export default function CsDashboard2() {
                   <button className="csd2-cta-btn" type="submit" disabled={saving}>{saving ? "Saving..." : "Save Call"}</button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddLeadModal && (
+        <div className="csd2-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeAddLeadModal(); }}>
+          <div className="csd2-modal">
+            <div className="csd2-modal-header">
+              <h2>Add Lead</h2>
+              <button className="csd2-close-btn" type="button" onClick={closeAddLeadModal}>×</button>
+            </div>
+            <div className="csd2-modal-body">
+              <form ref={addLeadFormRef} onSubmit={handleSaveLead}>
+                <div className="csd2-modal-grid">
+                  <div className="csd2-field csd2-full">
+                    <label htmlFor="csd2LeadName">Full Name</label>
+                    <input id="csd2LeadName" name="fullName" type="text" required />
+                  </div>
+                  <div className="csd2-field">
+                    <label htmlFor="csd2LeadPhone">Phone</label>
+                    <input id="csd2LeadPhone" name="phone" type="text" />
+                  </div>
+                  <div className="csd2-field">
+                    <label htmlFor="csd2LeadEmail">Email</label>
+                    <input id="csd2LeadEmail" name="email" type="email" />
+                  </div>
+                  <div className="csd2-field csd2-full">
+                    <label htmlFor="csd2LeadSource">Source</label>
+                    <select id="csd2LeadSource" name="referralPartnerId" defaultValue="">
+                      <option value="">Direct</option>
+                      {referralPartners.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 18 }}>
+                  <button className="csd2-secondary-btn" type="button" onClick={closeAddLeadModal} disabled={saving}>Cancel</button>
+                  <button className="csd2-cta-btn" type="submit" disabled={saving}>{saving ? "Saving..." : "Add Lead"}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOnboardClientModal && (
+        <div className="csd2-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeOnboardClientModal(); }}>
+          <div className="csd2-modal">
+            <div className="csd2-modal-header">
+              <h2>Onboard Client — Step {onboardClientStep} of 2</h2>
+              <button className="csd2-close-btn" type="button" onClick={closeOnboardClientModal}>×</button>
+            </div>
+            <div className="csd2-modal-body">
+              {onboardClientStep === 1 ? (
+                <>
+                  <div className="csd2-modal-grid">
+                    <div className="csd2-field csd2-full">
+                      <label htmlFor="csd2OcName">Full Name</label>
+                      <input
+                        id="csd2OcName" type="text" required
+                        value={onboardClientData.fullName}
+                        onChange={(e) => setOnboardClientData((d) => ({ ...d, fullName: e.target.value }))}
+                      />
+                    </div>
+                    <div className="csd2-field">
+                      <label htmlFor="csd2OcPhone">Phone</label>
+                      <input
+                        id="csd2OcPhone" type="text"
+                        value={onboardClientData.phone}
+                        onChange={(e) => setOnboardClientData((d) => ({ ...d, phone: e.target.value }))}
+                      />
+                    </div>
+                    <div className="csd2-field">
+                      <label htmlFor="csd2OcEmail">Email</label>
+                      <input
+                        id="csd2OcEmail" type="email"
+                        value={onboardClientData.email}
+                        onChange={(e) => setOnboardClientData((d) => ({ ...d, email: e.target.value }))}
+                      />
+                    </div>
+                    <div className="csd2-field csd2-full">
+                      <label htmlFor="csd2OcSource">Source</label>
+                      <select
+                        id="csd2OcSource"
+                        value={onboardClientData.referralPartnerId}
+                        onChange={(e) => setOnboardClientData((d) => ({ ...d, referralPartnerId: e.target.value }))}
+                      >
+                        <option value="">Direct</option>
+                        {referralPartners.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 18 }}>
+                    <button className="csd2-secondary-btn" type="button" onClick={closeOnboardClientModal}>Cancel</button>
+                    <button
+                      className="csd2-cta-btn" type="button"
+                      onClick={() => { if (onboardClientData.fullName.trim()) setOnboardClientStep(2); }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="csd2-list-stack">
+                    <div className="csd2-list-item">
+                      <div className="csd2-list-item-title">{onboardClientData.fullName}</div>
+                      <div className="csd2-list-item-sub">{onboardClientData.phone || "—"} · {onboardClientData.email || "—"}</div>
+                      <div className="csd2-subtle">
+                        Source: {referralPartners.find((p) => p.id === onboardClientData.referralPartnerId)?.name || "Direct"}
+                      </div>
+                    </div>
+                  </div>
+                  <p className="csd2-subtle">This creates an unpaid client file starting in New Leads. Docs and payment are tracked from there.</p>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 18 }}>
+                    <button className="csd2-secondary-btn" type="button" onClick={() => setOnboardClientStep(1)} disabled={saving}>Back</button>
+                    <button className="csd2-cta-btn" type="button" onClick={submitOnboardClient} disabled={saving}>
+                      {saving ? "Creating..." : "Create Client"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOnboardPartnerModal && (
+        <div className="csd2-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeOnboardPartnerModal(); }}>
+          <div className="csd2-modal">
+            <div className="csd2-modal-header">
+              <h2>Onboard Partner — Step {onboardPartnerStep} of 2</h2>
+              <button className="csd2-close-btn" type="button" onClick={closeOnboardPartnerModal}>×</button>
+            </div>
+            <div className="csd2-modal-body">
+              {onboardPartnerStep === 1 ? (
+                <>
+                  <div className="csd2-modal-grid">
+                    <div className="csd2-field csd2-full">
+                      <label htmlFor="csd2OpName">Partner Name</label>
+                      <input id="csd2OpName" type="text" required value={onboardPartnerName} onChange={(e) => setOnboardPartnerName(e.target.value)} />
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 18 }}>
+                    <button className="csd2-secondary-btn" type="button" onClick={closeOnboardPartnerModal}>Cancel</button>
+                    <button className="csd2-cta-btn" type="button" onClick={() => { if (onboardPartnerName.trim()) setOnboardPartnerStep(2); }}>Next</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p>Add <strong>{onboardPartnerName}</strong> as a lead source available on every Source picker?</p>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 18 }}>
+                    <button className="csd2-secondary-btn" type="button" onClick={() => setOnboardPartnerStep(1)} disabled={saving}>Back</button>
+                    <button className="csd2-cta-btn" type="button" onClick={submitOnboardPartner} disabled={saving}>
+                      {saving ? "Adding..." : "Add Partner"}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

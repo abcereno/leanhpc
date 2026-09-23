@@ -50,7 +50,16 @@ export const PERMISSION_PRESETS = [
   {
     key: "documents_team",
     label: "Documents Team",
-    description: "Document handling only — no calling permissions.",
+    // Was "document handling only" — broadened for the rebuilt CS
+    // Dashboard (src/components/admin/customer-service/CsDashboard2.jsx)
+    // to also cover the File Status + Call Log view: view_leads (new
+    // leads/unpaid signups working toward "Ready for Roselle") and
+    // log_cs_calls (relationship calls, not bureau-dispute calls — no
+    // call_experian/call_transunion/call_equifax here, matching that
+    // this role doesn't process clients). See sql/add_permissions.sql's
+    // customer_service backfill for the same change applied to existing
+    // employees already on this preset.
+    description: "Documents + CS relationship calls and file-status tracking — no bureau processing.",
     permissions: permissionsFrom([
       "view_clients",
       "view_workflow_progress",
@@ -59,6 +68,8 @@ export const PERMISSION_PRESETS = [
       "approve_documents",
       "generate_cfpb_package",
       "generate_postalocity_package",
+      "view_leads",
+      "log_cs_calls",
     ]),
   },
   {

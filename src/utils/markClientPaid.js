@@ -14,6 +14,7 @@
 import { supabase } from "../supabaseClient";
 import { sendWebhook } from "../hooks/useWebhookSender";
 import { SERVICES } from "./services";
+import { maybeAssignToRoselle } from "./fileReadiness";
 
 const PAID_WEBHOOKS = [
   "https://services.leadconnectorhq.com/hooks/rqr5oOzXxiHjh8wSS7T2/webhook-trigger/775e674e-e9dd-43df-852f-574865edcc84",
@@ -98,6 +99,14 @@ export async function markClientPaid(clientId, client, { triggerSource = "manual
   await Promise.all(PAID_WEBHOOKS.map((url) =>
     sendWebhook(payload, url).catch((e) => console.error(`Webhook failed: ${e.message}`))
   ));
+
+  // Fire-and-forget: this is the ONE shared path every "mark paid" flow in
+  // the app already goes through (see this file's own header comment on
+  // why that matters) — the single place to catch an LTOS File Status file
+  // becoming fully ready the moment payment clears, without having to hook
+  // every individual "mark paid" button separately. No-op for non-LTOS
+  // clients or ones still missing a document (see utils/fileReadiness.js).
+  maybeAssignToRoselle(clientId);
 
   return { error: null };
 }

@@ -203,11 +203,14 @@ function AppRoutes() {
         {/* Permission-based: any document-handling capability gets in — see
             utils/permissions.js. Previously a hard-coded role allowlist. */}
         <Route element={<PermissionGuard permissions={['view_documents', 'upload_documents', 'approve_documents', 'reject_documents', 'generate_cfpb_package', 'generate_postalocity_package', 'download_documents']} />}>
-            <Route path="/cs-dashboard" element={<ClientDocumentDashboard />} />
-            {/* Preview build of the revamped CS dashboard (see CsDashboard2.jsx
-                header comment) — separate route, same access gate as the live
-                one, so it can be reviewed without touching /cs-dashboard. */}
+            {/* Rebuilt CS dashboard (File Status + Call Log — see CsDashboard2.jsx
+                header comment) is now the live one at /cs-dashboard. The old
+                document-only tool stays reachable at its legacy path below for
+                anyone who has it bookmarked; /cs-dashboard2 is kept as an alias
+                so nothing that linked to the preview build breaks. */}
+            <Route path="/cs-dashboard" element={<CsDashboard2 />} />
             <Route path="/cs-dashboard2" element={<CsDashboard2 />} />
+            <Route path="/cs-dashboard-legacy" element={<ClientDocumentDashboard />} />
         </Route>
 
         {/* === INTERNAL STAFF: ADMIN / DEVELOPER PORTAL === */}

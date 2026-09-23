@@ -223,7 +223,6 @@ export default function IndividualLayout() {
 
         setHelpRequested(true);
         localStorage.setItem(`helpRequested_${clientId}`, "true");
-        setIsBannerMinimized(true);
 
     } catch (err) {
         console.error("Error requesting help:", err);

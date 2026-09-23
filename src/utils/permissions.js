@@ -158,6 +158,25 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
+    key: "customer_relations",
+    label: "Customer Relations",
+    permissions: [
+      // Gates the File Status view in the rebuilt CS Dashboard
+      // (src/components/admin/customer-service/CsDashboard2.jsx) — new
+      // leads/company_leads and unpaid-signup clients working toward
+      // "Ready for Roselle". Deliberately separate from view_clients:
+      // an employee can see the full client roster without also seeing
+      // the lead-intake pipeline, and vice versa.
+      { key: "view_leads", label: "View Leads / File Status" },
+      // Logging a CS relationship call (cs_call_log — Interested/Follow
+      // Up/Called/etc.) is a different action from the bureau-dispute
+      // calls under Call Center above (call_experian/call_transunion/
+      // call_equifax, which write to the unrelated call_logs table) —
+      // an employee can have one without the other.
+      { key: "log_cs_calls", label: "Log Customer Service Calls" },
+    ],
+  },
+  {
     key: "payments",
     label: "Payments",
     permissions: [

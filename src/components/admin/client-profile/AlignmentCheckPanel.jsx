@@ -27,6 +27,7 @@ import { useAlignmentDocs } from "../../../hooks/useAlignmentDocs";
 import { useAuth } from "../../../context/AuthContext";
 import { buildAiDetectedLines } from "../../../utils/documentAssetLabels";
 import { overrideDocumentValidation, OVERRIDE_STATUS_LABELS } from "../../../utils/overrideDocumentValidation";
+import { maybeAssignToRoselle } from "../../../utils/fileReadiness";
 
 const BUCKET = "clients"; // ftc_report + letter files live here (LetterEditorModal.jsx's bucket) — NOT the separate "cover-letter-assets" bucket CoverLetterAssets.jsx uses for license/ssn/poa.
 
@@ -163,6 +164,12 @@ export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh })
       }
 
       addToast({ title: "Checked", message: result.reasoning || "Alignment check complete.", variant: "success", icon: "bi-check-circle" });
+      // Fire-and-forget: if this check just made an LTOS file's ID+Address
+      // fully verified (and payment already cleared), it now belongs to
+      // Roselle's queue (see utils/fileReadiness.js). No-op for every
+      // other case (non-LTOS client, still missing something, already
+      // assigned to her).
+      maybeAssignToRoselle(clientId);
       await reload();
       // This panel's own useAlignmentDocs instance just refetched via
       // reload() above, but ClientHeader.jsx's Personal Info "AI detected"
@@ -216,6 +223,10 @@ export default function AlignmentCheckPanel({ clientId, refreshKey, onRefresh })
       }
 
       addToast({ title: "Overridden", message: `Marked "${result.label}" manually.`, variant: "success", icon: "bi-person-check-fill" });
+      // Same fire-and-forget Roselle sweep as runCheck() above — an
+      // override to "valid" can complete a file just as much as a fresh
+      // AI check can.
+      maybeAssignToRoselle(clientId);
       await reload();
       onRefresh && onRefresh();
     } catch (err) {
