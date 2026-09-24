@@ -56,6 +56,7 @@
 // this light GHL-style design the moment it reused those names — the
 // exact bug ClassicReportPage.jsx had before it was scoped the same way).
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../../../supabaseClient";
 import { useAuth } from "../../../context/AuthContext";
 import { useToast } from "../../shared/ui/ToastNotifier";
@@ -79,7 +80,23 @@ const FILE_STATUS_TABS = [
   { key: "missing_docs", label: "Missing Docs" },
   { key: "payment_pending", label: "Payment Pending" },
   { key: "ready", label: "Ready for Roselle" },
+  { key: "all", label: "All files" },
 ];
+// Buckets that still need work — this is what the File Status nav badge
+// and the QUEUES sidebar section count against, matching the reviewed
+// reference design (Ready for Roselle files are done, so they're excluded
+// from the "needs attention" badge but still get their own queue link).
+const FILE_STATUS_OPEN_BUCKETS = ["new_leads", "missing_docs", "payment_pending"];
+
+// Stable color per referral partner name, independent of insertion order
+// or id (a simple string hash into the fixed csd2-chip-0..5 palette in
+// CsDashboard2.css) — "Direct" always gets its own neutral chip instead.
+function sourceChipClass(name) {
+  if (!name || name === "Direct") return "csd2-chip-direct";
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return `csd2-chip-${hash % 6}`;
+}
 
 function docStatusLabel(status) {
   if (status === "verified") return "Verified";
@@ -91,15 +108,15 @@ function docStatusClass(status) {
   if (status === "uploaded") return "csd2-status-yellow";
   return "csd2-status-red";
 }
-function paymentStatusLabel(status) {
-  if (status === "verified") return "Verified";
-  if (status === "pending") return "Pending";
-  return "Not sent";
-}
 function paymentStatusClass(status) {
   if (status === "verified") return "csd2-status-green";
   if (status === "pending") return "csd2-status-yellow";
   return "csd2-status-unknown";
+}
+function bucketStatusClass(bucket) {
+  if (bucket === "ready") return "csd2-status-green";
+  if (bucket === "new_leads") return "csd2-status-unknown";
+  return "csd2-status-yellow"; // missing_docs, payment_pending
 }
 
 // See the file header comment — every query in this dashboard is scoped
@@ -114,6 +131,7 @@ const NAV_ITEMS = [
   { key: "tasks", icon: "✅", label: "Tasks" },
   { key: "calendar", icon: "📅", label: "Calendar" },
   { key: "clients", icon: "👥", label: "Clients" },
+  { key: "partners", icon: "🤝", label: "Partners" },
   { key: "reports", icon: "📊", label: "Reports" },
   { key: "team", icon: "👨‍💼", label: "Team" },
 ];
@@ -226,6 +244,7 @@ async function selectResilient(table, columns, applyFilters) {
 export default function CsDashboard2() {
   const { user, fullName } = useAuth();
   const { addToast } = useToast();
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [migrationMissing, setMigrationMissing] = useState(false);
@@ -569,6 +588,28 @@ export default function CsDashboard2() {
     fileStatusRows.forEach((r) => { counts[r.bucket] = (counts[r.bucket] || 0) + 1; });
     return counts;
   }, [fileStatusRows]);
+  // "Needs attention" total for the File Status nav badge and QUEUES
+  // section header — everything except Ready for Roselle, which is done.
+  const fileStatusOpenCount = useMemo(
+    () => FILE_STATUS_OPEN_BUCKETS.reduce((sum, key) => sum + (fileStatusCounts[key] || 0), 0),
+    [fileStatusCounts]
+  );
+
+  // Clients + leads currently attributed to each referral partner — the
+  // Partners page's own CLIENTS column. Counts across both tables since a
+  // partner's referral can currently be sitting as either.
+  const partnerClientCounts = useMemo(() => {
+    const counts = new Map();
+    [...payingClients, ...unpaidClients].forEach((c) => {
+      if (!c.referral_partner_id) return;
+      counts.set(c.referral_partner_id, (counts.get(c.referral_partner_id) || 0) + 1);
+    });
+    leads.forEach((l) => {
+      if (!l.referral_partner_id) return;
+      counts.set(l.referral_partner_id, (counts.get(l.referral_partner_id) || 0) + 1);
+    });
+    return counts;
+  }, [payingClients, unpaidClients, leads]);
 
   const fileStatusVisibleRows = useMemo(
     () => (activeFileStatusTab === "all" ? fileStatusRows : fileStatusRows.filter((r) => r.bucket === activeFileStatusTab)),
@@ -846,9 +887,26 @@ export default function CsDashboard2() {
                 onClick={() => setActiveSectionAndClear(item.key)}
               >
                 <span>{item.icon}</span> {item.label}
+                {item.key === "file-status" && fileStatusOpenCount > 0 && (
+                  <span className="csd2-nav-badge">{fileStatusOpenCount}</span>
+                )}
               </button>
             ))}
           </nav>
+
+          <div className="csd2-queues">
+            <div className="csd2-queues-title">QUEUES</div>
+            {FILE_STATUS_TABS.filter((t) => t.key !== "all").map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className={`csd2-queue-row ${activeSection === "file-status" && activeFileStatusTab === t.key ? "csd2-active" : ""}`}
+                onClick={() => { setActiveSectionAndClear("file-status"); setActiveFileStatusTab(t.key); }}
+              >
+                {t.label} <span className="csd2-queue-count">{fileStatusCounts[t.key] || 0}</span>
+              </button>
+            ))}
+          </div>
 
           <div className="csd2-sidebar-footer">
             <div className="csd2-avatar">{initialsFromName(displayName).slice(0, 1)}</div>
@@ -862,6 +920,9 @@ export default function CsDashboard2() {
         <main className="csd2-main">
           {activeSection === "dashboard" && (
             <section>
+              <div className="csd2-breadcrumb">
+                Hidden Partner Cloud / <span className="csd2-crumb-current">Dashboard</span>
+              </div>
               <div className="csd2-topbar">
                 <div className="csd2-welcome">
                   <h1>Welcome back, {displayName}</h1>
@@ -932,6 +993,9 @@ export default function CsDashboard2() {
 
           {activeSection === "call-log" && (
             <section>
+              <div className="csd2-breadcrumb">
+                Hidden Partner Cloud / <span className="csd2-crumb-current">Call Log</span>
+              </div>
               <div className="csd2-topbar">
                 <div className="csd2-welcome">
                   <h1>Welcome back, {displayName}</h1>
@@ -1025,9 +1089,15 @@ export default function CsDashboard2() {
 
           {activeSection === "leads" && (
             <section>
+              <div className="csd2-breadcrumb">
+                Hidden Partner Cloud / <span className="csd2-crumb-current">Leads</span>
+              </div>
               <div className="csd2-panel-head">
                 <h2 className="csd2-section-title" style={{ margin: 0 }}>Leads</h2>
-                <button className="csd2-secondary-btn" type="button" onClick={openLogModal}>Log Call</button>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button className="csd2-primary-btn" type="button" onClick={() => setShowAddLeadModal(true)}>＋ Add Lead</button>
+                  <button className="csd2-secondary-btn" type="button" onClick={openLogModal}>Log Call</button>
+                </div>
               </div>
               <div className="csd2-card csd2-panel-body">
                 {leadsRows.length === 0 ? (
@@ -1039,7 +1109,7 @@ export default function CsDashboard2() {
                       {leadsRows.map((l) => (
                         <tr key={l.rowKey}>
                           <td>{l.name}</td>
-                          <td>{l.source}</td>
+                          <td><span className={`csd2-chip ${sourceChipClass(l.source)}`}>{l.source}</span></td>
                           <td>{l.phone}</td>
                           <td>{l.email}</td>
                           <td>{l.status ? <span className={`csd2-badge ${statusBadgeClass(l.status)}`}>{statusLabel(l.status)}</span> : "—"}</td>
@@ -1060,27 +1130,47 @@ export default function CsDashboard2() {
 
           {activeSection === "file-status" && (
             <section>
-              <div className="csd2-topbar">
+              <div className="csd2-breadcrumb">
+                Hidden Partner Cloud / File Status /{" "}
+                <span className="csd2-crumb-current">
+                  {FILE_STATUS_TABS.find((t) => t.key === activeFileStatusTab)?.label || "All files"}
+                </span>
+              </div>
+              <div className="csd2-page-header">
                 <div>
-                  <h2 className="csd2-section-title" style={{ margin: 0 }}>File Status</h2>
-                  <p className="csd2-subtle" style={{ margin: 0 }}>Identity docs, payment, and readiness for every LTOS file.</p>
+                  <h1>File Status</h1>
+                  <p className="csd2-subtle" style={{ margin: "6px 0 0" }}>
+                    Every file, by what it still needs. Nothing reaches Roselle until source, docs, and payment are green.
+                  </p>
                 </div>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button className="csd2-secondary-btn" type="button" onClick={() => setShowOnboardPartnerModal(true)}>＋ Onboard Partner</button>
-                  <button className="csd2-secondary-btn" type="button" onClick={() => setShowAddLeadModal(true)}>＋ Add Lead</button>
-                  <button className="csd2-primary-btn" type="button" onClick={() => setShowOnboardClientModal(true)}>＋ Onboard Client</button>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button className="csd2-primary-btn" type="button" onClick={() => setShowAddLeadModal(true)}>＋ Add Lead</button>
+                  <button className="csd2-secondary-btn" type="button" onClick={() => setShowOnboardClientModal(true)}>Onboard Client</button>
+                  <button className="csd2-secondary-btn" type="button" onClick={() => setShowOnboardPartnerModal(true)}>Onboard Partner</button>
                 </div>
               </div>
 
-              <div className="csd2-tabs">
+              <div className="csd2-howto-banner">
+                <strong>How files move:</strong> every new lead and logged call starts in <em>New Leads</em>. ID and
+                Address documents move to <em>Uploaded</em> then <em>Verified</em> through the real Alignment Check
+                process elsewhere in the app — this view reflects that status, it doesn't set it. The file sits in{" "}
+                <em>Missing Docs</em> until both are verified. Send the invoice to move Payment to <em>Pending</em>;
+                it becomes <em>Verified</em> once the payment actually clears. When docs and payment are both
+                verified, the file moves to <em>Ready for Roselle</em> on its own.
+              </div>
+
+              <div className="csd2-fs-tabs">
                 {FILE_STATUS_TABS.map((t) => (
                   <button
                     key={t.key}
                     type="button"
-                    className={`csd2-tab ${activeFileStatusTab === t.key ? "csd2-active" : ""}`}
+                    className={`csd2-fs-tab ${activeFileStatusTab === t.key ? "csd2-active" : ""}`}
                     onClick={() => setActiveFileStatusTab(t.key)}
                   >
-                    {t.label} <span className="csd2-badge csd2-status-unknown">{fileStatusCounts[t.key] || 0}</span>
+                    {t.label}{" "}
+                    <span className="csd2-badge csd2-status-unknown">
+                      {t.key === "all" ? fileStatusRows.length : fileStatusCounts[t.key] || 0}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -1092,30 +1182,44 @@ export default function CsDashboard2() {
                   <table>
                     <thead>
                       <tr>
-                        <th>CLIENT</th><th>SOURCE</th><th>ID</th><th>ADDRESS</th><th>PAYMENT</th><th>RATE</th><th>ASSIGNED TO</th><th></th>
+                        <th>CLIENT</th><th>SOURCE</th><th>ID</th><th>ADDRESS</th><th>PAYMENT</th><th>RATE</th><th>ASSIGNED TO</th><th>STATUS</th><th></th>
                       </tr>
                     </thead>
                     <tbody>
                       {fileStatusVisibleRows.map((r) => (
                         <tr key={r.id}>
                           <td>
-                            {r.name}
+                            <span className="csd2-name">{r.name}</span>
                             <div className="csd2-list-item-sub">{r.phone}</div>
                           </td>
-                          <td>{r.source}</td>
+                          <td><span className={`csd2-chip ${sourceChipClass(r.source)}`}>{r.source}</span></td>
                           <td><span className={`csd2-badge ${docStatusClass(r.idStatus)}`}>{docStatusLabel(r.idStatus)}</span></td>
                           <td><span className={`csd2-badge ${docStatusClass(r.addressStatus)}`}>{docStatusLabel(r.addressStatus)}</span></td>
-                          <td><span className={`csd2-badge ${paymentStatusClass(r.paymentStatus)}`}>{paymentStatusLabel(r.paymentStatus)}</span></td>
-                          <td>{r.rate}</td>
-                          <td>{r.assignedTo}</td>
                           <td>
                             {r.paymentStatus === "not_sent" ? (
                               <button className="csd2-secondary-btn" type="button" disabled={sendingInvoiceFor === r.id} onClick={() => sendInvoice(r.id)}>
                                 {sendingInvoiceFor === r.id ? "Sending..." : "Send Invoice"}
                               </button>
                             ) : (
-                              <span className="csd2-subtle">{r.paymentStatus === "pending" ? "Invoice sent" : "—"}</span>
+                              // Pending/Verified aren't staff-editable here — Verified only ever
+                              // comes from the real payment flow (markClientPaid), which also resets
+                              // bureau statuses and fires the paid webhooks. A plain dropdown that let
+                              // CS flip straight to Verified would silently skip all of that.
+                              <select className={`csd2-payment-select ${paymentStatusClass(r.paymentStatus)}`} value={r.paymentStatus} disabled>
+                                <option value="pending">Pending</option>
+                                <option value="verified">Verified</option>
+                              </select>
                             )}
+                          </td>
+                          <td>{r.rate}</td>
+                          <td>{r.assignedTo}</td>
+                          <td>
+                            <span className={`csd2-badge ${bucketStatusClass(r.bucket)}`}>
+                              {FILE_STATUS_TABS.find((t) => t.key === r.bucket)?.label || r.bucket}
+                            </span>
+                          </td>
+                          <td>
+                            <button className="csd2-secondary-btn" type="button" onClick={() => navigate(`/clients/${r.id}`)}>Open File →</button>
                           </td>
                         </tr>
                       ))}
@@ -1205,6 +1309,9 @@ export default function CsDashboard2() {
 
           {activeSection === "clients" && (
             <section>
+              <div className="csd2-breadcrumb">
+                Hidden Partner Cloud / <span className="csd2-crumb-current">Clients</span>
+              </div>
               <div className="csd2-panel-head"><h2 className="csd2-section-title" style={{ margin: 0 }}>Clients</h2></div>
               <div className="csd2-card csd2-panel-body">
                 {clientsRows.length === 0 ? (
@@ -1215,9 +1322,49 @@ export default function CsDashboard2() {
                     <tbody>
                       {clientsRows.map((c) => (
                         <tr key={c.id}>
-                          <td>{c.name}</td><td>{c.source}</td><td>{c.phone}</td><td>{c.lastOutcome}</td><td>{c.lastCallDate}</td><td>{c.owner}</td>
+                          <td>{c.name}</td>
+                          <td><span className={`csd2-chip ${sourceChipClass(c.source)}`}>{c.source}</span></td>
+                          <td>{c.phone}</td><td>{c.lastOutcome}</td><td>{c.lastCallDate}</td><td>{c.owner}</td>
                           <td>
                             <button className="csd2-secondary-btn" type="button" onClick={() => logCallFor("client", c.id)}>Log Call</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
+          )}
+
+          {activeSection === "partners" && (
+            <section>
+              <div className="csd2-breadcrumb">
+                Hidden Partner Cloud / <span className="csd2-crumb-current">Partners</span>
+              </div>
+              <div className="csd2-page-header">
+                <h1>Partners</h1>
+                <button className="csd2-primary-btn" type="button" onClick={() => setShowOnboardPartnerModal(true)}>Onboard Partner</button>
+              </div>
+              <div className="csd2-card csd2-panel-body">
+                {referralPartners.length === 0 ? (
+                  <EmptyState title="No referral partners yet" message="Onboard a partner to make them available as a lead source." />
+                ) : (
+                  <table>
+                    <thead><tr><th>PARTNER</th><th>CLIENTS</th><th></th></tr></thead>
+                    <tbody>
+                      {referralPartners.map((p) => (
+                        <tr key={p.id}>
+                          <td><span className={`csd2-chip ${sourceChipClass(p.name)}`}>{p.name}</span></td>
+                          <td>{partnerClientCounts.get(p.id) || 0}</td>
+                          <td>
+                            <button
+                              className="csd2-secondary-btn"
+                              type="button"
+                              onClick={() => { setShowAddLeadModal(true); }}
+                            >
+                              Add Lead for This Partner
+                            </button>
                           </td>
                         </tr>
                       ))}
