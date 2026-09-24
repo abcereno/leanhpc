@@ -38,7 +38,12 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--csd2-bg);
   color: var(--csd2-text);
-  min-height: 100vh;
+  /* Fixed to the viewport, not min-height — the whole dashboard shell
+     (sidebar / main / details) must fit in one screen with no page-level
+     scroll. Each pane scrolls internally instead; see .csd2-sidebar,
+     .csd2-main, .csd2-details below. */
+  height: 100vh;
+  overflow: hidden;
 }
 
 .csd2-root * {
@@ -60,7 +65,7 @@
 .csd2-app {
   display: grid;
   grid-template-columns: 240px 1fr 360px;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 /* Dark navy sidebar — matches the reviewed Hidden Partner Cloud reference
@@ -76,6 +81,8 @@
   background: var(--csd2-sb-bg);
   border-right: 1px solid var(--csd2-sb-border);
   padding: 24px 14px;
+  height: 100%;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -223,6 +230,8 @@
 .csd2-main {
   padding: 28px 24px 24px;
   min-width: 0;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .csd2-topbar {
@@ -748,6 +757,8 @@
   background: var(--csd2-panel);
   border-left: 1px solid var(--csd2-border);
   padding: 22px;
+  height: 100%;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -997,8 +1008,25 @@
 }
 
 @media (max-width: 1400px) {
+  /* Below this width .csd2-details drops into a second row instead of a
+     third column, so the fixed-height/internal-scroll trick above (built
+     for the 3-column desktop layout) no longer applies cleanly — fall
+     back to normal page scroll here instead of clipping content. */
+  .csd2-root {
+    height: auto;
+    overflow: visible;
+  }
+
   .csd2-app {
+    height: auto;
     grid-template-columns: 220px 1fr;
+  }
+
+  .csd2-sidebar,
+  .csd2-main,
+  .csd2-details {
+    height: auto;
+    overflow-y: visible;
   }
 
   .csd2-details {
