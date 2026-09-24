@@ -470,17 +470,22 @@ export default function CsDashboard2() {
   // mockup's generic-lead version did — we already have a canonical
   // `clients` table, so this shows the real roster (including anyone never
   // called yet) with their most recent call summarized alongside.
+  const referralPartnerNameById = useMemo(
+    () => new Map(referralPartners.map((p) => [p.id, p.name])),
+    [referralPartners]
+  );
   const clientsRows = useMemo(
     () =>
       payingClients.map((c) => ({
         id: c.id,
         name: c.full_name,
         phone: c.phone || "—",
+        source: referralPartnerNameById.get(c.referral_partner_id) || "Direct",
         lastOutcome: latestByClientId.get(c.id)?.outcome || "Not yet called",
         lastCallDate: latestByClientId.get(c.id)?.date || "—",
         owner: latestByClientId.get(c.id)?.calledBy || "—",
       })),
-    [payingClients, latestByClientId]
+    [payingClients, latestByClientId, referralPartnerNameById]
   );
   // Combines two prospect sources into one "real roster + latest call
   // alongside" list — company_leads (public widget) and unpaid `clients`
@@ -527,10 +532,6 @@ export default function CsDashboard2() {
 
     return [...widgetRows, ...signupRows].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }, [leads, unpaidClients, records, latestByClientId]);
-  const referralPartnerNameById = useMemo(
-    () => new Map(referralPartners.map((p) => [p.id, p.name])),
-    [referralPartners]
-  );
 
   // The File Status readiness pipeline — every LTOS client (paid or
   // unpaid), each with its computed doc/payment status and which of the
@@ -1210,11 +1211,11 @@ export default function CsDashboard2() {
                   <EmptyState title="No paying clients yet" message="Clients appear here once they're marked paid." />
                 ) : (
                   <table>
-                    <thead><tr><th>CLIENT</th><th>PHONE</th><th>LAST OUTCOME</th><th>LAST CALLED</th><th>OWNER</th><th></th></tr></thead>
+                    <thead><tr><th>CLIENT</th><th>SOURCE</th><th>PHONE</th><th>LAST OUTCOME</th><th>LAST CALLED</th><th>OWNER</th><th></th></tr></thead>
                     <tbody>
                       {clientsRows.map((c) => (
                         <tr key={c.id}>
-                          <td>{c.name}</td><td>{c.phone}</td><td>{c.lastOutcome}</td><td>{c.lastCallDate}</td><td>{c.owner}</td>
+                          <td>{c.name}</td><td>{c.source}</td><td>{c.phone}</td><td>{c.lastOutcome}</td><td>{c.lastCallDate}</td><td>{c.owner}</td>
                           <td>
                             <button className="csd2-secondary-btn" type="button" onClick={() => logCallFor("client", c.id)}>Log Call</button>
                           </td>
