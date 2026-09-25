@@ -114,6 +114,54 @@ export async function resolveRoundForNewClient(email, confirmFn = window.confirm
 }
 
 /**
+ * Best-effort: link a just-inserted clients row to its `people`/`orders`
+ * rows (see sql/add_client_identity_orders.sql for what these are and why,
+ * and sql/add_resolve_person_and_order_rpc.sql for why this goes through a
+ * SECURITY DEFINER RPC instead of writing to people/orders directly — 4 of
+ * the 7 add-client forms run as non-staff callers that those tables' own
+ * RLS doesn't grant direct access to).
+ *
+ * Never throws and never blocks client creation: if Phase 1's migration
+ * and/or the RPC migration haven't been run against this database yet,
+ * this silently no-ops (same degrade-gracefully convention as the
+ * dispute_round/service_id fallback above) so every add-client form keeps
+ * working exactly as it did before this existed.
+ */
+async function linkPersonAndOrder(clientId, payload) {
+  if (!clientId) return;
+  try {
+    const { data, error } = await supabase.rpc("resolve_person_and_order", {
+      p_full_name: payload.full_name ?? null,
+      p_email: payload.email ?? null,
+      p_phone: payload.phone ?? null,
+      p_dob: payload.dob ?? null,
+      p_ssn: payload.ssn ?? null,
+      p_address: payload.address ?? null,
+      p_service_id: payload.service_id ?? null,
+      p_dispute_method: payload.dispute_method ?? null,
+      p_company_id: payload.company_id ?? null,
+    });
+    if (error || !data || !data[0]) {
+      console.warn(
+        "resolve_person_and_order not available yet (run sql/add_client_identity_orders.sql and sql/add_resolve_person_and_order_rpc.sql) — skipping person/order link:",
+        error?.message
+      );
+      return;
+    }
+    const { person_id, order_id } = data[0];
+    const { error: updateError } = await supabase
+      .from("clients")
+      .update({ person_id, order_id })
+      .eq("id", clientId);
+    if (updateError) {
+      console.warn("Could not set clients.person_id/order_id:", updateError.message);
+    }
+  } catch (e) {
+    console.warn("linkPersonAndOrder failed (non-blocking):", e);
+  }
+}
+
+/**
  * Insert a new clients row. Every add-client form calls this instead of
  * `supabase.from("clients").insert(...)` directly, because all 6 forms now
  * put `dispute_round` in the payload — if sql/add_dispute_round.sql hasn't
@@ -129,17 +177,26 @@ export async function resolveRoundForNewClient(email, confirmFn = window.confirm
  * services table so none of the 6 forms have to be touched individually
  * (see sql/add_services.sql for why dispute_method itself is left alone).
  *
- * `options.select`, if given, is applied as `.select(select).single()`,
- * matching how most of the forms already chained their insert. Returns
+ * Also links the new row to its people/orders identity (see
+ * linkPersonAndOrder above) — same reasoning, one shared choke point
+ * instead of touching every add-client form individually.
+ *
+ * `options.select`, if given, is merged with "id" (id is always fetched
+ * internally so the person/order link above has something to update, even
+ * for callers — e.g. BrokerAddClientForm.jsx — that don't request any
+ * columns back themselves) and applied as `.select(...).single()`. Returns
  * `{ data, error }` either way.
  */
 export async function insertClientRecord(payload, options = {}) {
   const { select } = options;
 
-  const runInsert = (p) => {
-    let query = supabase.from("clients").insert(p);
-    return select ? query.select(select).single() : query;
-  };
+  const selectClause = select
+    ? select.split(",").map((s) => s.trim()).includes("id")
+      ? select
+      : `id, ${select}`
+    : "id";
+
+  const runInsert = (p) => supabase.from("clients").insert(p).select(selectClause).single();
 
   let workingPayload = { ...payload };
   if ("dispute_method" in workingPayload && !("service_id" in workingPayload)) {
@@ -160,6 +217,29 @@ export async function insertClientRecord(payload, options = {}) {
       workingPayload = rest;
       ({ data, error } = await runInsert(workingPayload));
     }
+  }
+
+  // Defensive: selecting the row back after insert (needed so the
+  // person/order link below has an id to work with) requires a SELECT RLS
+  // policy on top of the INSERT one. 6 of the 7 add-client forms already do
+  // this successfully today — including the fully public/anon
+  // AddClientForm.jsx — so this is proven safe for those roles, but
+  // BrokerAddClientForm.jsx never requested a row back before this change,
+  // so its role's SELECT access on a just-inserted row is unconfirmed. If
+  // the row was actually created but PostgREST couldn't return it (an RLS
+  // read-back rejection, not an insert failure), fall back to a
+  // representation-free insert so client creation itself never regresses —
+  // this add-client form just won't get its people/orders link until that
+  // role's access is confirmed/widened.
+  if (error && /row-level security|PGRST116/i.test(error.message || "")) {
+    console.warn("Could not read back the inserted clients row (RLS) — retrying without select:", error.message);
+    const fallback = await supabase.from("clients").insert(workingPayload);
+    data = null;
+    error = fallback.error;
+  }
+
+  if (!error && data?.id) {
+    await linkPersonAndOrder(data.id, workingPayload);
   }
 
   return { data, error };
