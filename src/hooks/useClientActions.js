@@ -5,6 +5,7 @@ import { useConfirm } from "../components/shared/ui/ConfirmDialog";
 import { markClientPaid } from "../utils/markClientPaid";
 import { computeWeightedProgress } from "../utils/progressWeighting";
 import { insertClientRecord, copyIdentityDocuments, getNextRoundForEmail } from "../utils/clientDuplicateRound";
+import { serviceById } from "../utils/services";
 
 export function useClientActions(clientId, client, refetch, onRefresh) {
   const { addToast } = useToast();
@@ -359,6 +360,74 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
     return data.id;
   };
 
+  // Phase 3's "+ New Order" — same mechanics as startNewRound above (copy
+  // identity info + documents into a brand-new clients row, nothing
+  // credit-report/progress-related carried over), the one difference being
+  // `serviceId` is caller-chosen instead of copied from `client.service_id`.
+  // No new SQL/RPC needed for this: insertClientRecord's linkPersonAndOrder
+  // (see clientDuplicateRound.js and sql/add_resolve_person_and_order_rpc.sql)
+  // already keys the order lookup on (person_id, service) — passing a
+  // DIFFERENT service than the client's current one naturally resolves to a
+  // NEW order for the same person, while passing the SAME service resolves
+  // to the SAME order (making this behave exactly like startNewRound if the
+  // caller picks the client's own current service). dispute_round still
+  // comes from getNextRoundForEmail, same global-per-person counter every
+  // other round uses — see that function's own comment for why this is
+  // deliberately not scoped per-order.
+  const startNewOrder = async (serviceId) => {
+    const service = serviceById(serviceId);
+    if (!service) {
+      err("Pick a service to start the new order with.");
+      return null;
+    }
+
+    const nextRound = await getNextRoundForEmail(client.email);
+    const confirmed = await confirm({
+      title: "New Order",
+      message: `Start a new "${service.label}" engagement for ${client.full_name || "this client"}? This copies their personal info (name, SSN, contact, address) and identity documents (ID, proof of address, authorization) into a brand-new client record. It will NOT carry over the credit report, inquiry counts, payment status, or progress from any existing order.`,
+      confirmText: "Start New Order",
+      variant: "warning",
+    });
+    if (!confirmed) return null;
+
+    const { data, error: e } = await insertClientRecord({
+      full_name: client.full_name,
+      ssn: client.ssn,
+      email: client.email,
+      phone: client.phone,
+      dob: client.dob,
+      address: client.address,
+      dispute_method: service.disputeMethod,
+      service_id: service.id,
+      logins_notes: client.logins_notes,
+      company_id: client.company_id,
+      admin_id: client.admin_id,
+      agent_id: client.agent_id,
+      agent: client.agent,
+      agent_code: client.agent_code,
+      dispute_round: nextRound,
+    }, { select: "id" });
+
+    if (e || !data) {
+      err(`Failed to start new order: ${e?.message || "unknown error"}`);
+      return null;
+    }
+
+    const { copied, skipped } = await copyIdentityDocuments(clientId, data.id);
+    if (skipped > 0) {
+      addToast({
+        title: "New Order Started",
+        message: `${service.label} order created. ${copied} identity document(s) copied, ${skipped} could not be copied — check them manually on the new order.`,
+        variant: "warning",
+        icon: "bi-exclamation-triangle",
+      });
+    } else {
+      ok(`New "${service.label}" order started${copied ? ` — ${copied} identity document(s) copied.` : "."}`);
+    }
+
+    return data.id;
+  };
+
   return {
     markAsPaid, markAsUnpaid, togglePause, toggleInactive, toggleDispute, toggleInquiriesLock,
     updateStartDateToToday,
@@ -367,6 +436,7 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
     setProcessingStage,
     setNextPaymentDue,
     setPaymentPlan,
+    startNewOrder,
     startNewRound,
   };
 }

@@ -31,6 +31,7 @@ import InvoiceGeneratorModal from "./modals/InvoiceGeneratorModal";
 import ManagerOverrideModal from "./modals/ManagerOverrideModal";
 import MarkPaidAmountModal from "./modals/MarkPaidAmountModal";
 import EditPaymentPlanModal from "./modals/EditPaymentPlanModal";
+import NewOrderModal from "./modals/NewOrderModal";
 import RegenerateHistoryBtn from "../RegenerateHistoryBtn";
 import ClientBillingPanel from "./ClientBillingPanel";
 import { sendFullCompletionWebhook, sendBureauCompletionWebhook } from "../../../utils/completionWebhook";
@@ -205,6 +206,15 @@ function RoundSwitcher({ clientId, email, currentRound }) {
 export default function ClientHeader({ clientId, onEdit, readonly = false, onRefresh, refreshKey }) {
   const { hasPermission } = useAuth();
   const canEdit = !readonly && hasPermission("edit_client");
+  // Pre-existing bug fixed in passing: handleStartNewRound below already
+  // called navigate() on success, but this component never declared its
+  // own — the only `navigate` in this file was scoped inside the separate
+  // RoundSwitcher component above, so "Start New Round" threw a
+  // ReferenceError right after successfully creating the round (the round
+  // itself still got created; only the auto-navigate-to-it step broke).
+  // handleStartNewOrder below needs the same navigate, which is what
+  // surfaced this.
+  const navigate = useNavigate();
 
   const { client, loading, error, refetch } = useClient(clientId);
   const { addToast } = useToast();
@@ -358,6 +368,17 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
     } finally {
       setStartingRound(false);
     }
+  };
+
+  // Phase 3's "+ New Order" — same navigate-on-success pattern as Start New
+  // Round above, but the modal collects a service pick first (see
+  // useClientActions.js#startNewOrder and NewOrderModal.jsx). Returns the
+  // new client's id to the modal too, since NewOrderModal closes itself
+  // only once it gets a truthy id back.
+  const handleStartNewOrder = async (serviceId) => {
+    const newClientId = await actions.startNewOrder(serviceId);
+    if (newClientId) navigate(`/clients/${newClientId}`);
+    return newClientId;
   };
 
 
@@ -542,6 +563,7 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
     generateInvoice: <InvoiceGeneratorModal show onClose={closeModal} client={client} />,
     markPaid: <MarkPaidAmountModal show onClose={closeModal} clientName={client?.full_name} onConfirm={actions.markAsPaid} />,
     editBillingPlan: <EditPaymentPlanModal show onClose={closeModal} clientName={client?.full_name} initial={client} onConfirm={actions.setPaymentPlan} />,
+    newOrder: <NewOrderModal show onClose={closeModal} clientName={client?.full_name} currentServiceId={resolveServiceId(client)} onConfirm={handleStartNewOrder} />,
   };
 
   if (loading) return <div>Loading client details...</div>;
@@ -994,6 +1016,11 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                             {startingRound
                               ? <><Spinner animation="border" size="sm" className="me-2" /> Starting Round {(client.dispute_round || 1) + 1}...</>
                               : <><i className="bi bi-arrow-repeat me-2 text-warning" /> Start New Round (Round {(client.dispute_round || 1) + 1})</>}
+                          </Dropdown.Item>
+                        )}
+                        {hasPermission("edit_client") && (
+                          <Dropdown.Item onClick={() => setActiveModal("newOrder")} className="py-2">
+                            <i className="bi bi-folder-plus me-2 text-warning" /> New Order
                           </Dropdown.Item>
                         )}
                         {hasPermission("train_ai_rules") && (
