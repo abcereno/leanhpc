@@ -1,12 +1,18 @@
 import { useCallback, useRef, useState } from "react";
+import { getIntegrationSettingValue } from "../utils/integrationSettings";
 
 /**
  * useBureauWebhookDispatcher
  * Send a bureau-specific call payload to a webhook.
  *
  * - Bureau must be one of: "exp" | "tu" | "eq"
- * - Hard-coded defaults kept intentionally (you said you'll swap later)
+ * - URL for each bureau comes from integration_settings (see
+ *   sql/add_integration_settings.sql — seeded with what used to be
+ *   hardcoded literals here, now editable on the admin Integration
+ *   Settings page instead of requiring a deploy to rotate).
  * - Optional config override: useBureauWebhookDispatcher({ exp, tu, eq })
+ *   still takes priority over the DB-backed URL, for any caller that wants
+ *   to bypass integration_settings entirely.
  *
  * API:
  *   const { sendCall, status, isLoading, error, lastResponse, reset } =
@@ -14,6 +20,8 @@ import { useCallback, useRef, useState } from "react";
  *
  *   await sendCall("exp", payload, { timeoutMs?: number, headers?: object });
  */
+const SETTING_KEY_FOR_BUREAU = { exp: "highlevel_bureau_exp_webhook_url", tu: "highlevel_bureau_tu_webhook_url", eq: "highlevel_bureau_eq_webhook_url" };
+
 export function useBureauWebhookDispatcher(config) {
   // status for the *latest* request only
   const [status, setStatus] = useState("idle"); // idle | loading | success | error
@@ -23,23 +31,11 @@ export function useBureauWebhookDispatcher(config) {
   // Guard against race conditions: only the latest request updates state
   const requestIdRef = useRef(0);
 
-  const urlFor = useCallback((bureauRaw) => {
+  const urlFor = useCallback(async (bureauRaw) => {
     const bureau = (bureauRaw || "").toString().trim().toLowerCase();
-
-    // Intentionally hard-coded; override by passing config if/when needed.
-    const defaults = {
-      exp: "https://services.leadconnectorhq.com/hooks/rqr5oOzXxiHjh8wSS7T2/webhook-trigger/YAGaU7IgBAweA8krfhqQ",
-      tu:  "https://services.leadconnectorhq.com/hooks/rqr5oOzXxiHjh8wSS7T2/webhook-trigger/TkH0imUJPpA9k0zy7icf",
-      eq:  "https://services.leadconnectorhq.com/hooks/rqr5oOzXxiHjh8wSS7T2/webhook-trigger/QPAvlhWtjMcc4oaGW1aY",
-    };
-
-    const cfg = {
-      exp: (config && config.exp) || defaults.exp,
-      tu:  (config && config.tu)  || defaults.tu,
-      eq:  (config && config.eq)  || defaults.eq,
-    };
-
-    return cfg[bureau];
+    const override = config && config[bureau];
+    if (override) return override;
+    return getIntegrationSettingValue(SETTING_KEY_FOR_BUREAU[bureau]);
   }, [config]);
 
   const reset = useCallback(() => {
@@ -55,8 +51,8 @@ export function useBureauWebhookDispatcher(config) {
         throw new Error(`Invalid bureau: ${bureauRaw}`);
       }
 
-      const url = urlFor(bureau);
-      if (!url) throw new Error(`No webhook URL configured for bureau: ${bureau}`);
+      const url = await urlFor(bureau);
+      if (!url) throw new Error(`No webhook URL configured for bureau: ${bureau} — set one on the Integration Settings page.`);
 
       const reqId = ++requestIdRef.current;
       setStatus("loading");

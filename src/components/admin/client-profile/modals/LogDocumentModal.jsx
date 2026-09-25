@@ -4,9 +4,11 @@ import { supabase } from "../../../../supabaseClient";
 import { useAuth } from "../../../../context/AuthContext";
 import { getEasternDateString } from "../../../../utils/timezone";
 import { useToast } from "../../../shared/ui/ToastNotifier";
+import { sendHighLevelEvent } from "../../../../utils/highlevelWebhook";
 
-// 🔒 Hard-code your webhook here:
-const HL_WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/rqr5oOzXxiHjh8wSS7T2/webhook-trigger/74390dd8-3c06-4cd3-9ff3-1f2295f902f8";
+// URL now lives in integration_settings ("Document Logged Webhook" on the
+// admin Integration Settings page) instead of hardcoded here.
+const HL_WEBHOOK_KEY = "highlevel_document_logged_webhook_url";
 
 // `initialBureaus` (e.g. { EXP: true }) pre-checks whichever bureau this
 // modal was opened for — used by DocumentRouting.jsx, which opens this
@@ -37,59 +39,13 @@ export default function LogDocumentModal({ show, onClose, clientId, initialBurea
   const toggleBureau = (key) =>
     setBureaus((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // ---- Robust sender: fetch → sendBeacon → image GET fallback
+  // Delegates to the shared sender (highlevelWebhook.js), which looks the
+  // URL up from integration_settings and does its own fetch → no-cors
+  // fallback — this used to be its own independent fetch/sendBeacon/image
+  // fallback chain reading a hardcoded URL constant.
   const sendToHighLevel = async (payload) => {
-    if (!HL_WEBHOOK_URL) {
-      console.warn("HL webhook URL missing.");
-      return false;
-    }
-
-    // Try normal fetch (JSON)
-    try {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), 8000); // 8s timeout
-
-      const res = await fetch(HL_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        keepalive: true,
-        signal: controller.signal,
-      });
-      clearTimeout(id);
-
-      if (res.ok) {
-        return true;
-      } else {
-        const text = await res.text().catch(() => "");
-        console.error("[HL] fetch failed", res.status, text);
-      }
-    } catch (err) {
-      console.error("[HL] fetch error", err?.message || err);
-    }
-
-    // Try sendBeacon (no CORS preflight; text/plain)
-    try {
-      const beaconData = new Blob([JSON.stringify(payload)], {
-        type: "text/plain",
-      });
-      const ok = navigator.sendBeacon?.(HL_WEBHOOK_URL, beaconData);
-      if (ok) return true;
-    } catch (err) {
-      console.error("[HL] sendBeacon error", err?.message || err);
-    }
-
-    // Final fallback: 1px GET with querystring (some relays accept GET)
-    try {
-      const qs = encodeURIComponent(JSON.stringify(payload));
-      const img = new Image();
-      img.src = `${HL_WEBHOOK_URL}?payload=${qs}`;
-      return true; // fire-and-forget
-    } catch (err) {
-      console.error("[HL] image fallback error", err?.message || err);
-    }
-
-    return false;
+    const result = await sendHighLevelEvent(HL_WEBHOOK_KEY, payload);
+    return result.ok !== false;
   };
 
   const handleSubmit = async () => {

@@ -15,6 +15,7 @@ import { supabase } from "../supabaseClient";
 import { sendWebhook } from "../hooks/useWebhookSender";
 import { SERVICES } from "./services";
 import { maybeAssignToRoselle } from "./fileReadiness";
+import { sendPaymentStatusChangedEvent } from "./highlevelWebhook";
 
 const PAID_WEBHOOKS = [
   "https://services.leadconnectorhq.com/hooks/rqr5oOzXxiHjh8wSS7T2/webhook-trigger/775e674e-e9dd-43df-852f-574865edcc84",
@@ -107,6 +108,12 @@ export async function markClientPaid(clientId, client, { triggerSource = "manual
   // every individual "mark paid" button separately. No-op for non-LTOS
   // clients or ones still missing a document (see utils/fileReadiness.js).
   maybeAssignToRoselle(clientId);
+
+  // "payment_status_changed" to the new CS Dashboard Events webhook — this
+  // is the one shared path every "mark paid" flow in the app goes through
+  // (see this file's header comment), so it's the single place to fire
+  // this rather than hooking every individual "mark paid" button.
+  sendPaymentStatusChangedEvent(clientId, { isPaid: true, amount: Number.isFinite(numericAmount) && numericAmount > 0 ? numericAmount : null });
 
   return { error: null };
 }

@@ -25,9 +25,13 @@
 // needing a different webhook URL per service.
 import { supabase } from "../supabaseClient";
 import { serviceById, serviceByDisputeMethod } from "./services";
+import { sendHighLevelEvent } from "./highlevelWebhook";
 
-export const COMPLETION_WEBHOOK_URL =
-  "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/423af280-1504-4014-9f5e-f10b9bbc0985";
+// URL now lives in integration_settings ("Bureau Completion Webhook" on the
+// admin Integration Settings page — see sql/add_integration_settings.sql,
+// which seeds it with what used to be this hardcoded literal) instead of
+// here, so it can be rotated without a deploy.
+const COMPLETION_WEBHOOK_KEY = "highlevel_completion_webhook_url";
 
 function resolveService(clientRow) {
   const svc =
@@ -81,24 +85,9 @@ async function fetchClientForWebhook(clientId) {
 }
 
 async function postCompletionWebhook(payload) {
-  try {
-    await fetch(COMPLETION_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) {
-    console.error("❌ Completion webhook failed:", e);
-    try {
-      await fetch(COMPLETION_WEBHOOK_URL, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    } catch (e2) {
-      console.error("❌ Completion webhook fallback also failed:", e2);
-    }
+  const result = await sendHighLevelEvent(COMPLETION_WEBHOOK_KEY, payload);
+  if (result.ok === false && !result.skipped) {
+    console.error("❌ Completion webhook failed:", result.statusText, result.body);
   }
 }
 

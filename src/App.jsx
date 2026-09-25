@@ -101,6 +101,7 @@ const IntakeDashboard = lazy(() => import("./components/admin/IntakeDashboard"))
 const AdminProfile = lazy(() => import("./components/admin/AdminProfile"));
 const AddAffiliateForm = lazy(() => import("./components/admin/AddAffiliateForm"));
 const CompanyHolidays = lazy(() => import("./components/admin/CompanyHolidays"));
+const IntegrationSettings = lazy(() => import("./components/admin/IntegrationSettings"));
 const FunderEligibilityCard = lazy(() => import("./components/shared/ui/FunderEligibilityCard"));
 const InternalSpreadsheet = lazy(() => import("./components/admin/InternalSpreadsheet"));
 const ManagementLogs = lazy(() => import("./components/admin/ManagementLogs"));
@@ -324,6 +325,7 @@ function AppRoutes() {
             <Route element={<PermissionGuard permissions={['settings']} />}>
               <Route path="/ai-testing" element={<AITestingPlayground />} />
               <Route path="/company-holidays" element={<CompanyHolidays />} />
+              <Route path="/integration-settings" element={<IntegrationSettings />} />
             </Route>
 
             <Route element={<PermissionGuard permissions={['verify_payments']} />}>

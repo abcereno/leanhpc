@@ -6,6 +6,7 @@ import { markClientPaid } from "../utils/markClientPaid";
 import { computeWeightedProgress } from "../utils/progressWeighting";
 import { insertClientRecord, copyIdentityDocuments, getNextRoundForEmail } from "../utils/clientDuplicateRound";
 import { serviceById } from "../utils/services";
+import { sendProcessingStageChangedEvent } from "../utils/highlevelWebhook";
 
 export function useClientActions(clientId, client, refetch, onRefresh) {
   const { addToast } = useToast();
@@ -267,8 +268,13 @@ export function useClientActions(clientId, client, refetch, onRefresh) {
   // ClientHeader.jsx's Status dropdown submenu. No confirmation needed
   // (skipConfirm=true), same reasoning as markBureauComplete/NA: a quick,
   // easily-reversible pick from a fixed list, not a destructive action.
-  const setProcessingStage = (stageId) =>
-    update({ processing_stage: stageId || null, processing_stage_updated_at: new Date().toISOString() }, null, true);
+  const setProcessingStage = (stageId) => {
+    const previousStage = client?.processing_stage || null;
+    // "processing_stage_changed" to the CS Dashboard Events webhook —
+    // fire-and-forget, doesn't block/gate the actual stage update above.
+    sendProcessingStageChangedEvent(clientId, { previousStage, newStage: stageId || null });
+    return update({ processing_stage: stageId || null, processing_stage_updated_at: new Date().toISOString() }, null, true);
+  };
 
   // Manually-set "remind me to collect payment on this date" — see
   // sql/add_next_payment_due.sql's header comment for why this is a plain

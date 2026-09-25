@@ -213,6 +213,9 @@ export default function AdminSidebar({ isSidebarOpen, setIsSidebarOpen }) {
                 {hasAnyPermission(['settings']) && (
                   <NavItem path="/company-holidays" icon="bi-calendar-event" label="Company Holidays" />
                 )}
+                {hasAnyPermission(['settings']) && (
+                  <NavItem path="/integration-settings" icon="bi-plug-fill" label="Integration Settings" />
+                )}
                 {hasAnyPermission(['view_call_notes']) && (
                   <NavItem path="/call-logs" icon="bi-telephone" label="Call Logs" />
                 )}

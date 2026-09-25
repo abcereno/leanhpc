@@ -22,6 +22,7 @@
 import { supabase } from "../supabaseClient";
 import { ROSELLE_ADMIN_ID } from "./staff";
 import { LTOS_COMPANY_ID } from "./companies";
+import { sendClientDoneEvent, sendNeedsMoreDocumentsEvent } from "./highlevelWebhook";
 
 /** "missing" (never uploaded) | "uploaded" (on file, not yet a clean AI-verified pass) | "verified" (validation_status is "valid"). */
 export function computeIdentityStatus(row) {
@@ -104,13 +105,36 @@ export async function fetchIdentityDocsForClients(clientIds) {
   return result;
 }
 
+// Fires needs_more_documents / client_completed at most once per bucket per
+// clientId per page load — a plain in-memory Set, not persisted anywhere.
+// maybeAssignToRoselle is called after every doc check/override and every
+// mark-paid, which can happen several times in a row for the same client
+// (e.g. checking license then POA back to back); without this a single
+// document session could fire the same GHL event repeatedly. Session-only
+// is an intentional tradeoff — a fresh page load re-fires once, which is
+// harmless for a GHL workflow reacting to "this file needs docs"/"this
+// file is done", same as this app already accepts for the older bureau
+// completion webhooks (see completionWebhook.js's own per-caller guard
+// comment).
+const firedBucketEvents = new Set();
+
+function fireBucketEventOnce(clientId, bucket) {
+  const dedupeKey = `${clientId}:${bucket}`;
+  if (firedBucketEvents.has(dedupeKey)) return;
+  firedBucketEvents.add(dedupeKey);
+  if (bucket === "missing_docs") sendNeedsMoreDocumentsEvent(clientId);
+  if (bucket === "ready") sendClientDoneEvent(clientId, { reason: "file_status_ready" });
+}
+
 /**
  * Call after any action that could complete a file (a doc check/override
  * in AlignmentCheckPanel.jsx, a payment being marked paid, or an
- * opportunistic sweep on CS Dashboard load). Re-reads fresh state and, if
- * the file is now fully ready and not already assigned to Roselle,
- * assigns it to her. Silent no-op otherwise — safe to call speculatively
- * after any client update without checking readiness yourself first.
+ * opportunistic sweep on CS Dashboard load). Re-reads fresh state,
+ * fires the matching HighLevel event for the client's current File Status
+ * bucket (see fireBucketEventOnce above), and — if the file is now fully
+ * ready and not already assigned to Roselle — assigns it to her. Silent
+ * no-op otherwise — safe to call speculatively after any client update
+ * without checking readiness yourself first.
  */
 export async function maybeAssignToRoselle(clientId) {
   if (!clientId) return { assigned: false };
@@ -125,7 +149,6 @@ export async function maybeAssignToRoselle(clientId) {
   // reassign a client belonging to some other company just because their
   // docs happened to get verified.
   if (client.company_id !== LTOS_COMPANY_ID) return { assigned: false };
-  if (client.admin_id === ROSELLE_ADMIN_ID) return { assigned: false };
 
   const docs = await fetchIdentityDocsForClients([clientId]);
   const { license, poa } = docs.get(clientId) || {};
@@ -134,6 +157,9 @@ export async function maybeAssignToRoselle(clientId) {
     addressStatus: computeIdentityStatus(poa),
     paymentStatus: computePaymentStatus(client),
   });
+  fireBucketEventOnce(clientId, bucket);
+
+  if (client.admin_id === ROSELLE_ADMIN_ID) return { assigned: false };
   if (bucket !== "ready") return { assigned: false };
 
   const { error: updErr } = await supabase.from("clients").update({ admin_id: ROSELLE_ADMIN_ID }).eq("id", clientId);

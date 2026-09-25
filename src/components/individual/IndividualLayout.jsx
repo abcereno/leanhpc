@@ -7,6 +7,7 @@ import { useClient } from "../../hooks/useClient";
 import { useClientCreditFiles } from "../../hooks/useClientCreditFiles";
 import { deriveServiceId } from "../../utils/services";
 import { markClientPaid } from "../../utils/markClientPaid";
+import { sendHighLevelEvent } from "../../utils/highlevelWebhook";
 import { LTOS_COMPANY_ID } from "../../utils/companies";
 
 import { Joyride, STATUS } from 'react-joyride';
@@ -212,12 +213,9 @@ export default function IndividualLayout() {
         });
         if (error) throw error;
         
-        const webhookUrl = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/36c7c9da-355a-46ad-826b-2b378a560212";
-        await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: client?.email, fullName: client?.full_name, phone: client?.phone || "", source: "preview_activation_request", clientId: clientId })
-        });
+        // URL now lives in integration_settings ("Individual Portal Webhook"
+        // on the admin Integration Settings page) instead of hardcoded here.
+        await sendHighLevelEvent("highlevel_individual_webhook_url", { email: client?.email, fullName: client?.full_name, phone: client?.phone || "", source: "preview_activation_request", clientId: clientId });
         
         addToast({ title: "Request Sent", message: "An admin has been notified and will contact you shortly to activate your portal.", variant: "success", icon: "bi-check-circle-fill" });
 
@@ -269,22 +267,19 @@ export default function IndividualLayout() {
             }
             
             try {
-                const webhookUrl = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/36c7c9da-355a-46ad-826b-2b378a560212";
-                await fetch(webhookUrl, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ 
-                        email: client?.email, 
-                        fullName: client?.full_name, 
-                        phone: client?.phone || "", 
-                        source: "client_payment_success", 
-                        paymentType: type || "unknown",
-                        invoiceId: invoiceId || "none",
-                        clientId: clientId 
-                    })
+                // Same "Individual Portal Webhook" integration_settings URL
+                // as handleRequestAdminHelp above — see sendHighLevelEvent.
+                await sendHighLevelEvent("highlevel_individual_webhook_url", {
+                    email: client?.email,
+                    fullName: client?.full_name,
+                    phone: client?.phone || "",
+                    source: "client_payment_success",
+                    paymentType: type || "unknown",
+                    invoiceId: invoiceId || "none",
+                    clientId: clientId,
                 });
-            } catch (webhookErr) { 
-                console.error("❌ Failed to send HighLevel webhook:", webhookErr); 
+            } catch (webhookErr) {
+                console.error("❌ Failed to send HighLevel webhook:", webhookErr);
             }
             
             window.history.replaceState(null, '', window.location.pathname);
