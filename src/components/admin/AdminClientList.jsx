@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import autoAnimate from "@formkit/auto-animate";
 import {
@@ -86,6 +86,21 @@ export default function AdminClientList() {
   const getActiveClient = (group) => {
     const picked = group.rounds.find((r) => r.id === selectedRoundByGroup[group.key]);
     return picked || group.rounds[group.rounds.length - 1];
+  };
+  // Phase 3 grouped view: a person with more than one order (distinct
+  // service engagement — see useAdminClients.js's groupRoundsByOrder) can
+  // expand their row to see each order and its rounds laid out separately,
+  // instead of just picking a round from one flat dropdown that mixes
+  // engagements together. Collapsed by default; keyed by group.key like
+  // selectedRoundByGroup above.
+  const [expandedGroups, setExpandedGroups] = useState(new Set());
+  const toggleExpanded = (key) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
@@ -425,8 +440,18 @@ export default function AdminClientList() {
                 }
                 if (selectedIds.has(client.id)) rowClass += " bg-primary bg-opacity-10";
 
+                // Global chronological position (matches the "Round N"
+                // labeling convention already used below and in
+                // ClientHeader.jsx's RoundSwitcher) — needed so the
+                // expanded order-by-order view labels rounds identically to
+                // the dropdown instead of restarting the count per order.
+                const roundIndexById = new Map(group.rounds.map((r, idx) => [r.id, idx]));
+                const hasMultipleOrders = group.orders && group.orders.length > 1;
+                const isExpanded = expandedGroups.has(group.key);
+
                 return (
-                  <tr key={group.key} className={rowClass}>
+                  <Fragment key={group.key}>
+                  <tr className={rowClass}>
                     <td className="text-center"><Form.Check type="checkbox" checked={selectedIds.has(client.id)} onChange={() => handleSelectRow(client.id)} /></td>
                     <td className="text-center text-muted fw-medium">{(page - 1) * pageSize + index + 1}</td>
                     <td>
@@ -460,14 +485,42 @@ export default function AdminClientList() {
                                 (group.rounds here comes from useAdminClients.js's
                                 already-fetched/grouped data rather than its own
                                 query), so it needed the same fix applied separately. */}
-                            {group.rounds.map((r, idx) => (
-                              <option key={r.id} value={r.id}>
-                                Round {idx + 1}{r.id === group.rounds[group.rounds.length - 1].id ? " (current)" : ""}
-                              </option>
-                            ))}
+                            {/* Grouped into <optgroup> by order/service
+                                once this person has more than one distinct
+                                engagement (see useAdminClients.js's
+                                groupRoundsByOrder) — a flat "Round 1..N"
+                                list used to mix an Inquiry Deletion round in
+                                with a completely separate Fraud Alert
+                                Removal round with no visual distinction. */}
+                            {hasMultipleOrders
+                              ? group.orders.map((order) => (
+                                  <optgroup key={order.key} label={order.serviceLabel}>
+                                    {order.rounds.map((r) => (
+                                      <option key={r.id} value={r.id}>
+                                        Round {roundIndexById.get(r.id) + 1}{r.id === group.rounds[group.rounds.length - 1].id ? " (current)" : ""}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                ))
+                              : group.rounds.map((r, idx) => (
+                                  <option key={r.id} value={r.id}>
+                                    Round {idx + 1}{r.id === group.rounds[group.rounds.length - 1].id ? " (current)" : ""}
+                                  </option>
+                                ))}
                           </Form.Select>
                         ) : (
                           client.dispute_round > 1 && <Badge bg="info" text="dark" className="shadow-sm" style={{fontSize: '0.65rem'}}><i className="bi bi-arrow-repeat"></i> ROUND {client.dispute_round}</Badge>
+                        )}
+                        {hasMultipleOrders && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-link p-0 text-muted text-decoration-none"
+                            onClick={(e) => { e.stopPropagation(); toggleExpanded(group.key); }}
+                            title="This person has more than one service engagement — expand to see each one's rounds separately"
+                          >
+                            <i className={`bi ${isExpanded ? "bi-chevron-up" : "bi-chevron-down"}`}></i>
+                            <span className="ms-1" style={{ fontSize: "0.7rem" }}>{group.orders.length} orders</span>
+                          </button>
                         )}
                         {client.is_paid && <Badge bg="success" className="shadow-sm" style={{fontSize: '0.65rem'}}><i className="bi bi-currency-dollar"></i> PAID</Badge>}
                         {client.is_paused && <Badge bg="warning" text="dark" className="shadow-sm" style={{fontSize: '0.65rem'}}><i className="bi bi-pause-fill"></i> PAUSED</Badge>}
@@ -615,6 +668,35 @@ export default function AdminClientList() {
                       </div>
                     </td>
                   </tr>
+                  {isExpanded && hasMultipleOrders && (
+                    <tr className={rowClass}>
+                      <td></td>
+                      <td></td>
+                      <td colSpan={8} className="bg-light border-top-0 py-2 ps-5">
+                        <div className="d-flex flex-column gap-2">
+                          {group.orders.map((order) => (
+                            <div key={order.key} className="d-flex align-items-center gap-2 small flex-wrap">
+                              <span className="fw-semibold text-muted" style={{ minWidth: "160px" }}>{order.serviceLabel}</span>
+                              <div className="d-flex gap-1 flex-wrap">
+                                {order.rounds.map((r) => (
+                                  <button
+                                    key={r.id}
+                                    type="button"
+                                    className={`btn btn-sm ${r.id === client.id ? "btn-primary" : "btn-outline-secondary"}`}
+                                    style={{ fontSize: "0.7rem", padding: "2px 8px" }}
+                                    onClick={() => setSelectedRoundByGroup((prev) => ({ ...prev, [group.key]: r.id }))}
+                                  >
+                                    Round {roundIndexById.get(r.id) + 1}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })
             )}

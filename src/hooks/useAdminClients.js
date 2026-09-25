@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { getHolidays, calculateBusinessDays, calculatePaidRunningDays } from "../utils/dateHelpers";
 import { useToast } from "../components/shared/ui/ToastNotifier";
 import { useConfirm } from "../components/shared/ui/ConfirmDialog";
-import { resolveServiceId } from "../utils/services";
+import { resolveServiceId, serviceLabel } from "../utils/services";
 import { allBureausResolved } from "../utils/inquiryCounts";
 import { fetchNextStepSignals, getNextStepTag } from "../utils/nextStepTag";
 import { fetchAllRows } from "../utils/fetchAllRows";
@@ -13,6 +13,40 @@ const DAY = 24 * 60 * 60 * 1000;
 
 // Each sortable column's first-click direction — see handleSort below.
 const SORT_DEFAULT_DIRECTION = { name: "asc", company: "asc", agent: "asc", progress: "desc", duration: "desc" };
+
+/**
+ * Sub-groups one person's rounds (already sorted oldest-first by
+ * groupedClients below) by order_id — one entry per distinct service
+ * engagement (see sql/add_client_identity_orders.sql's "WHY THIS SHAPE" for
+ * what an order is). Falls back to a service-derived key when order_id
+ * isn't populated yet (Phase 1 not run, or a legacy row), same
+ * degrade-gracefully reasoning as groupedClients' own person_id fallback —
+ * this still gives AdminClientList.jsx sensible order buckets (by service)
+ * even before that migration lands, instead of one giant unsorted bucket.
+ *
+ * Purely additive/display-only: nothing in filteredClientList/
+ * sortedFilteredClientList reads `.orders`, only AdminClientList.jsx's
+ * expand/collapse row rendering does, so this can't affect filtering,
+ * search, sort, or pagination.
+ */
+function groupRoundsByOrder(rows) {
+  const byOrder = new Map();
+  for (const r of rows) {
+    const key = r.order_id || `svc:${resolveServiceId(r) || r.dispute_method || "unknown"}`;
+    if (!byOrder.has(key)) byOrder.set(key, []);
+    byOrder.get(key).push(r);
+  }
+  return Array.from(byOrder.entries())
+    .map(([key, orderRounds]) => {
+      orderRounds.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      return {
+        key: String(key),
+        serviceLabel: serviceLabel(orderRounds[orderRounds.length - 1]),
+        rounds: orderRounds,
+      };
+    })
+    .sort((a, b) => new Date(a.rounds[0].created_at) - new Date(b.rounds[0].created_at));
+}
 
 export default function useAdminClients() {
   const { addToast } = useToast();
@@ -215,7 +249,7 @@ export default function useAdminClients() {
       // Dashboard, which reads straight from incomes). DocumentRouting.jsx
       // and utils/clientsData.js have this same latent bug on their own
       // separate clients fetches and haven't been fixed yet either.
-      let selectedFields = `${baseFields}, dispute_round, service_id`;
+      let selectedFields = `${baseFields}, dispute_round, service_id, person_id, order_id`;
       let { data: baseRows, error: baseErr } = await fetchAllRows("clients", {
         select: selectedFields,
         order: "created_at",
@@ -241,6 +275,10 @@ export default function useAdminClients() {
         ["inactivated_at", "sql/add_inactive_status.sql"],
         ["last_report_update_at", "sql/add_last_report_update.sql"],
         ["next_payment_due_at", "sql/add_next_payment_due.sql"],
+        // Both land in one migration — same either-name-could-error-first
+        // reasoning as dispute_round/service_id above.
+        ["person_id", "sql/add_client_identity_orders.sql"],
+        ["order_id", "sql/add_client_identity_orders.sql"],
       ]) {
         if (baseErr && selectedFields.includes(col) && new RegExp(col, "i").test(baseErr.message || "")) {
           console.warn(`clients.${col} not found (run ${sqlFile}) — falling back without it.`);
@@ -574,21 +612,39 @@ export default function useAdminClients() {
   // AdminClientList.jsx lets each row's dropdown pick a different round to
   // display without re-filtering/re-paginating anything.
   const groupedClients = useMemo(() => {
-    const byEmail = new Map();
+    const byPerson = new Map();
     const singles = [];
 
     for (const c of allClients) {
-      const email = String(c.email || "").trim().toLowerCase();
-      if (!email) {
-        singles.push({ key: `id:${c.id}`, rounds: [c] });
+      // Group by person_id when it's populated (sql/add_client_identity_
+      // orders.sql backfilled it, and every insert since links it via
+      // clientDuplicateRound.js's linkPersonAndOrder) — this is a real
+      // identity match, not a heuristic, and unlike the old email-only
+      // grouping it also correctly separates two different real people who
+      // share a blank/placeholder email (see that migration's EDGE CASES
+      // #2: each gets its own person row).
+      if (c.person_id) {
+        if (!byPerson.has(c.person_id)) byPerson.set(c.person_id, []);
+        byPerson.get(c.person_id).push(c);
         continue;
       }
-      if (!byEmail.has(email)) byEmail.set(email, []);
-      byEmail.get(email).push(c);
+      // Fallback for a row with no person_id yet — either Phase 1 hasn't
+      // been run on this database, or (in the brief window between
+      // deploying Phase 2 and Phase 1 actually landing) it was inserted
+      // before the RPC was available. Same email-based grouping this used
+      // before Phase 1 existed, so the list never regresses.
+      const email = String(c.email || "").trim().toLowerCase();
+      if (!email) {
+        singles.push({ key: `id:${c.id}`, rounds: [c], orders: groupRoundsByOrder([c]) });
+        continue;
+      }
+      const emailKey = `email:${email}`;
+      if (!byPerson.has(emailKey)) byPerson.set(emailKey, []);
+      byPerson.get(emailKey).push(c);
     }
 
     const groups = singles;
-    for (const [email, rows] of byEmail.entries()) {
+    for (const [key, rows] of byPerson.entries()) {
       // Sorted by created_at, not dispute_round — dispute_round is
       // unreliable as a sort key on legacy data (several genuinely
       // different rounds can share the same stored value, e.g. several
@@ -600,7 +656,7 @@ export default function useAdminClients() {
       // ClientHeader.jsx) — created_at is the one field that's always
       // trustworthy for "which round actually came last."
       rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      groups.push({ key: `email:${email}`, rounds: rows });
+      groups.push({ key: String(key), rounds: rows, orders: groupRoundsByOrder(rows) });
     }
 
     // Keep the same "most pending tasks, then newest" ordering the flat
