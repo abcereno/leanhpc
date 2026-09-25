@@ -85,7 +85,17 @@ export default function AdminClientList() {
   const [selectedRoundByGroup, setSelectedRoundByGroup] = useState({});
   const getActiveClient = (group) => {
     const picked = group.rounds.find((r) => r.id === selectedRoundByGroup[group.key]);
-    return picked || group.rounds[group.rounds.length - 1];
+    if (picked) return picked;
+    // A search matching an older round (see useAdminClients.js's
+    // filteredClientList) should display THAT round, not silently fall
+    // through to the latest one — otherwise a name/email/phone search can
+    // return a group whose visible row shows completely different info
+    // from what was searched for, looking like a wrong/broken match.
+    if (group.searchMatchedRoundId) {
+      const matched = group.rounds.find((r) => r.id === group.searchMatchedRoundId);
+      if (matched) return matched;
+    }
+    return group.rounds[group.rounds.length - 1];
   };
   // Phase 3 grouped view: a person with more than one order (distinct
   // service engagement — see useAdminClients.js's groupRoundsByOrder) can

@@ -224,7 +224,7 @@ export default function useAdminClients() {
       if (companiesData) setDbCompanies(companiesData);
 
       const baseFields = `
-            id, full_name, email, created_at, paid_at, date_completed, is_paid,
+            id, full_name, email, phone, created_at, paid_at, date_completed, is_paid,
             dispute_method, counter, start_inquiries, start_date,
             exp_na, tu_na, eq_na, exp_completed, tu_completed, eq_completed,
             admin_id, company_id, agent, progress,
@@ -677,6 +677,14 @@ export default function useAdminClients() {
     const fromStr = dateFrom || null;
     const toStr = dateTo || null;
 
+    // A round "matches" search on name, email, or phone — previously name
+    // only, so searching an email or phone number silently returned
+    // nothing even when the client existed.
+    const roundMatchesSearch = (r) =>
+      String(r.full_name || "").toLowerCase().includes(s) ||
+      String(r.email || "").toLowerCase().includes(s) ||
+      String(r.phone || "").toLowerCase().includes(s);
+
     return groupedClients.filter((group) => {
       const c = group.rounds[group.rounds.length - 1];
       // Paid/Unpaid both exclude completed clients now, matching how
@@ -721,17 +729,17 @@ export default function useAdminClients() {
 
       // Matched against EVERY round in the group, not just the
       // representative `c` (latest round) every other filter above uses.
-      // A name search is "find this person," and a person's most recent
-      // round can easily have different/wrong data from an earlier round
-      // that's actually the one someone's looking for — e.g. a stray test
-      // round (full_name "TEST") sharing a real client's email would
-      // otherwise make that client's ACTUAL round invisible to search
-      // entirely, since `c.full_name` would only ever be "TEST" for the
-      // whole group. Every other filter here (tab/task/service/dates/
+      // A name/email/phone search is "find this person," and a person's
+      // most recent round can easily have different/wrong data from an
+      // earlier round that's actually the one someone's looking for — e.g.
+      // a stray test round (full_name "TEST") sharing a real client's email
+      // would otherwise make that client's ACTUAL round invisible to
+      // search entirely, since `c.full_name` would only ever be "TEST" for
+      // the whole group. Every other filter here (tab/task/service/dates/
       // company/agent/aging) intentionally stays scoped to the current
       // round — those describe the client's CURRENT status, which is a
       // different question from "does this person exist in the list."
-      if (s && !group.rounds.some((r) => String(r.full_name || "").toLowerCase().includes(s))) return false;
+      if (s && !group.rounds.some(roundMatchesSearch)) return false;
 
       if (fromStr || toStr) {
         const clientDateStr = new Date(c.created_at).toLocaleDateString("en-CA");
@@ -765,6 +773,22 @@ export default function useAdminClients() {
         if (paidDaysFilter === "28plus" && !(d >= 28)) return false;
       }
       return true;
+    }).map((group) => {
+      // The row itself (AdminClientList.jsx) defaults to showing each
+      // group's LATEST round unless staff have explicitly picked a
+      // different one — but the match above can come from an OLDER round.
+      // Without this, searching a name/email/phone that only appears on an
+      // earlier round returned the right group, displaying the WRONG
+      // round's info with no visible connection to what was searched —
+      // looked like a broken/irrelevant result. Surfacing which round
+      // actually matched lets the row default to THAT round instead,
+      // same "latest matching round wins" logic group.orders already uses.
+      if (!s) return group;
+      let searchMatchedRoundId = null;
+      for (let i = group.rounds.length - 1; i >= 0; i--) {
+        if (roundMatchesSearch(group.rounds[i])) { searchMatchedRoundId = group.rounds[i].id; break; }
+      }
+      return searchMatchedRoundId ? { ...group, searchMatchedRoundId } : group;
     });
   }, [groupedClients, search, dateFrom, dateTo, companyFilter, agentFilter, serviceFilter, daysFilter, paidDaysFilter, activeTab, taskFilter]);
 
