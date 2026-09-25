@@ -10,6 +10,7 @@ import { classifyInquiries } from "../../../utils/classifyInquiries";
 import { flagGuardedInquiries } from "../../../utils/aiReviewQueue";
 import { useToast } from "../../shared/ui/ToastNotifier";
 import { useConfirm } from "../../shared/ui/ConfirmDialog";
+import DuplicateClientSearch from "../shared/DuplicateClientSearch";
 
 export default function SmartIdiQModal({ show, onClose }) {
   const { addToast } = useToast();
@@ -322,6 +323,7 @@ export default function SmartIdiQModal({ show, onClose }) {
             <button className="btn-close" onClick={onClose}></button>
           </div>
           <div className="modal-body">
+            <DuplicateClientSearch />
             <div className="row">
               <Form.Group className="mb-4">
                 <Form.Label>Client Full Name</Form.Label>

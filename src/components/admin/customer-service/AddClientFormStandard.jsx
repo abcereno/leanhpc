@@ -3,6 +3,7 @@ import { supabase } from "../../../supabaseClient"; // Adjust path if needed
 import { resolveRoundForNewClient, insertClientRecord } from "../../../utils/clientDuplicateRound";
 import { SERVICES } from "../../../utils/services";
 import { useConfirm } from "../../shared/ui/ConfirmDialog";
+import DuplicateClientSearch from "../shared/DuplicateClientSearch";
 
 export default function AddClientFormStandard({ onClientAdded }) {
   const { confirm } = useConfirm();
@@ -175,6 +176,7 @@ export default function AddClientFormStandard({ onClientAdded }) {
       <h4 className="mb-4 fw-bold"><i className="bi bi-person-plus me-2 text-primary"></i>Add New Client</h4>
 
       <form onSubmit={handleSubmit} className="text-dark">
+        <DuplicateClientSearch />
         {/* --- Identity Section --- */}
         <div className="row mb-3">
             <div className="col-md-6">

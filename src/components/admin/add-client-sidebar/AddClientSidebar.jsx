@@ -5,6 +5,7 @@ import useLogger from "../../../hooks/useLogger";
 import { useConfirm } from "../../shared/ui/ConfirmDialog";
 import { resolveRoundForNewClient, insertClientRecord } from "../../../utils/clientDuplicateRound";
 import { SERVICES } from "../../../utils/services";
+import DuplicateClientSearch from "../shared/DuplicateClientSearch";
 
 export default function AddClientSidebar({ isOpen, onClose, companyId }) {
   const { confirm } = useConfirm();
@@ -219,6 +220,7 @@ export default function AddClientSidebar({ isOpen, onClose, companyId }) {
 
         <div className="sidebar-body p-3 text-white">
           <form onSubmit={handleSubmit}>
+            <DuplicateClientSearch />
             <Form.Group className="mb-3">
               <Form.Label className="text-white">Full Name</Form.Label>
               <Form.Control type="text" name="full_name" value={form.full_name} onChange={handleChange} required />
