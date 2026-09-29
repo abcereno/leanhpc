@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../supabaseClient";
+import { getHolidays, calculatePaidRunningDays } from "../utils/dateHelpers";
 
 export function useClient(
   clientId,
@@ -68,24 +69,18 @@ export function useClient(
     }
 
     const createdAt = data.created_at ? new Date(data.created_at) : null;
-    const paidAt = data.paid_at ? new Date(data.paid_at) : null;
 
-    // [UPDATED LOGIC] Calculate running days while accounting for pauses
-    const now = new Date();
-    // If paused, use the pause timestamp as the "current" reference to freeze the count
-    const referenceDate = data.is_paused && data.paused_at ? new Date(data.paused_at) : now;
-
-    const runningDays =
-      data.is_paid && paidAt instanceof Date && !isNaN(paidAt)
-        ? Math.max(
-            0,
-            Math.ceil(
-              (Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), referenceDate.getUTCDate()) -
-                Date.UTC(paidAt.getUTCFullYear(), paidAt.getUTCMonth(), paidAt.getUTCDate())) /
-                (1000 * 60 * 60 * 24)
-            ) - (data.paused_days_total || 0) // Subtract the total historical days spent in pause
-          )
-        : null;
+    // Same shared helper the client list/dashboard views already use
+    // (utils/dateHelpers.js#calculatePaidRunningDays) — this used to be a
+    // bespoke calendar-day calculation that only accounted for pauses, not
+    // for date_completed. That meant a client's "days running" here kept
+    // climbing forever after they finished (this file's header badge is
+    // the one place staff actually look for "how long did this take"),
+    // disagreeing with the client list's own "Active Xd", which already
+    // freezes at date_completed. Business days (not calendar days) too,
+    // matching that same shared convention everywhere else in the app.
+    const holidays = await getHolidays();
+    const runningDays = data.is_paid ? calculatePaidRunningDays(data, holidays) : null;
 
     const tokenExpiresFormatted = data.public_token_expires_at
       ? new Date(data.public_token_expires_at).toLocaleString(
