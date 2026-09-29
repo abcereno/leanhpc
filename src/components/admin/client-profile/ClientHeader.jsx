@@ -611,52 +611,99 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
         <div className="card-header bg-primary text-white py-3">
           <h3 className="mb-0 d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center">
             <div className="d-flex flex-column">
-              {/* Name + status badges */}
-              <div className="d-flex align-items-center flex-wrap mb-1">
+              {/* Row 1 — identity: who this is, paid or not, which round.
+                  Kept to just these three so the name is never competing
+                  with half a dozen other badges for attention. */}
+              <div className="d-flex align-items-center flex-wrap mb-2">
                 <i className="bi bi-person-circle me-2" />
                 <span className="fw-bold">{client.full_name}</span>
                 <Badge bg={client.is_paid ? "success" : "danger"} className="ms-3">{client.is_paid ? "Paid" : "Unpaid"}</Badge>
                 <RoundSwitcher clientId={clientId} email={client.email} currentRound={client.dispute_round} />
-                {client.is_paused && <Badge bg="warning" text="dark" className="ms-2 shadow-sm"><i className="bi bi-pause-fill me-1" />PAUSED</Badge>}
-                {client.is_inactive && (
-                  <Badge bg="secondary" className="ms-2 shadow-sm" title={client.inactive_reason || undefined}>
-                    <i className="bi bi-slash-circle-fill me-1" />INACTIVE
-                  </Badge>
-                )}
-                {paymentDue && (
-                  <Badge bg={paymentDue.isOverdue ? "danger" : "info"} text={paymentDue.isOverdue ? undefined : "dark"} className="ms-2 shadow-sm" title={`Payment due ${new Date(client.next_payment_due_at + "T00:00:00").toLocaleDateString()}`}>
-                    <i className="bi bi-cash-coin me-1" />
-                    {paymentDue.isOverdue ? `PAYMENT OVERDUE ${Math.abs(paymentDue.daysLeft)}d` : `PAYMENT DUE ${paymentDue.daysLeft}d`}
-                  </Badge>
-                )}
-                {/* date_completed is set once, automatically, by the
-                    update_client_completion_status DB trigger the moment
-                    all 3 bureaus first read done/N-A (not by any button —
-                    the only frontend "Mark Complete" action, below, is
-                    dead for both current service families; see its own
-                    comment). Shown here so staff can see WHEN a client
-                    completed at a glance instead of only inferring it from
-                    a frozen "Active Xd" business-day count that gives no
-                    hint whether it's live or historical. */}
-                {client.date_completed && (
-                  <Badge bg="success" className="ms-2 shadow-sm" title="Set automatically once all 3 bureaus were done/N-A">
-                    <i className="bi bi-calendar-check-fill me-1" />
-                    Completed {new Date(client.date_completed).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                  </Badge>
-                )}
-                {client.is_paid && processingStageLabel(client.processing_stage) && (
-                  <Badge bg="info" text="dark" className="ms-2 shadow-sm" title="Set from the Status dropdown below">
-                    <i className="bi bi-signpost-split-fill me-1" />{processingStageLabel(client.processing_stage)}
-                  </Badge>
-                )}
-                {client.is_paid && (
-                  <>
-                    {client.exp_na ? <Badge bg="secondary" className="ms-2 shadow-sm">EXP N/A</Badge> : client.exp_completed ? <Badge bg="success" className="ms-2 shadow-sm">EXP DONE</Badge> : null}
-                    {client.tu_na  ? <Badge bg="secondary" className="ms-2 shadow-sm">TU N/A</Badge>  : client.tu_completed  ? <Badge bg="success" className="ms-2 shadow-sm">TU DONE</Badge>  : null}
-                    {client.eq_na  ? <Badge bg="secondary" className="ms-2 shadow-sm">EQ N/A</Badge>  : client.eq_completed  ? <Badge bg="success" className="ms-2 shadow-sm">EQ DONE</Badge>  : null}
-                  </>
-                )}
               </div>
+
+              {/* Row 2 — exception flags: things that need attention right
+                  now (paused, inactive, a payment overdue). Split out from
+                  Row 1 so a client in good standing shows a clean, short
+                  identity row instead of every possible badge slot. */}
+              {(client.is_paused || client.is_inactive || paymentDue) && (
+                <div className="d-flex align-items-center flex-wrap gap-2 mb-2">
+                  {client.is_paused && <Badge bg="warning" text="dark" className="shadow-sm"><i className="bi bi-pause-fill me-1" />PAUSED</Badge>}
+                  {client.is_inactive && (
+                    <Badge bg="secondary" className="shadow-sm" title={client.inactive_reason || undefined}>
+                      <i className="bi bi-slash-circle-fill me-1" />INACTIVE
+                    </Badge>
+                  )}
+                  {paymentDue && (
+                    <Badge bg={paymentDue.isOverdue ? "danger" : "info"} text={paymentDue.isOverdue ? undefined : "dark"} className="shadow-sm" title={`Payment due ${new Date(client.next_payment_due_at + "T00:00:00").toLocaleDateString()}`}>
+                      <i className="bi bi-cash-coin me-1" />
+                      {paymentDue.isOverdue ? `PAYMENT OVERDUE ${Math.abs(paymentDue.daysLeft)}d` : `PAYMENT DUE ${paymentDue.daysLeft}d`}
+                    </Badge>
+                  )}
+                </div>
+              )}
+
+              {/* Row 3 — progress context: when it finished (if it has) and
+                  what stage it's in now. */}
+              {(client.date_completed || (client.is_paid && processingStageLabel(client.processing_stage))) && (
+                <div className="d-flex align-items-center flex-wrap gap-2 mb-2">
+                  {/* date_completed is set once, automatically, by the
+                      update_client_completion_status DB trigger the moment
+                      all 3 bureaus first read done/N-A (not by any button —
+                      the only frontend "Mark Complete" action, below, is
+                      dead for both current service families; see its own
+                      comment). Shown here so staff can see WHEN a client
+                      completed at a glance instead of only inferring it
+                      from a frozen "Active Xd" business-day count that
+                      gives no hint whether it's live or historical. */}
+                  {client.date_completed && (
+                    <Badge bg="success" className="shadow-sm" title="Set automatically once all 3 bureaus were done/N-A">
+                      <i className="bi bi-calendar-check-fill me-1" />
+                      Completed {new Date(client.date_completed).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </Badge>
+                  )}
+                  {client.is_paid && processingStageLabel(client.processing_stage) && (
+                    <Badge bg="info" text="dark" className="shadow-sm" title="Set from the Status dropdown below">
+                      <i className="bi bi-signpost-split-fill me-1" />{processingStageLabel(client.processing_stage)}
+                    </Badge>
+                  )}
+                </div>
+              )}
+
+              {/* Row 4 — per-bureau status for THIS client's service.
+                  Labeled with the service itself (Inquiry Deletion, Case
+                  Management, Fraud Alert Removal, or Personal Identifiers —
+                  see utils/services.js) rather than a bare "EXP/TU/EQ",
+                  since all four services share this same exp/tu/eq_completed
+                  set of columns (see finalizeBureauAction's own comment on
+                  how classification vs direct services both funnel into
+                  it) and, without the label, a Fraud Alert/Personal
+                  Identifiers file's badges looked identical to an Inquiry
+                  Deletion file's — nothing distinguished which workflow
+                  actually produced them. Always shows all three bureaus
+                  (not just resolved ones) so a bureau nobody has touched
+                  yet reads as "Pending" instead of silently not appearing
+                  at all. */}
+              {client.is_paid && (
+                <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
+                  <Badge bg="dark" className="shadow-sm border border-light border-opacity-25">
+                    <i className="bi bi-building-check me-1" />{serviceLabel(client, "Service")}
+                  </Badge>
+                  {[
+                    { key: "exp", label: "EXP", na: client.exp_na, done: client.exp_completed },
+                    { key: "tu", label: "TU", na: client.tu_na, done: client.tu_completed },
+                    { key: "eq", label: "EQ", na: client.eq_na, done: client.eq_completed },
+                  ].map((b) => (
+                    <Badge
+                      key={b.key}
+                      bg={b.na ? "secondary" : b.done ? "success" : "light"}
+                      text={!b.na && !b.done ? "dark" : undefined}
+                      className="shadow-sm"
+                    >
+                      {b.na ? `${b.label} N/A` : b.done ? `${b.label} DONE` : `${b.label} PENDING`}
+                    </Badge>
+                  ))}
+                </div>
+              )}
 
               {/* AI-extracted name from the identity document on file —
                   see aiName above. Sits right under the client's name so a
