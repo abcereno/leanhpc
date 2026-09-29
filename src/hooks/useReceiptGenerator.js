@@ -3,8 +3,11 @@ import { v4 as uuidv4 } from "uuid";
 import { supabase } from "../supabaseClient";
 import { usePricingCalculator } from "./usePricingCalculator";
 import { useToast } from "../components/shared/ui/ToastNotifier";
+import { sendHighLevelEvent } from "../utils/highlevelWebhook";
 
-const RECEIPT_WEBHOOK = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/61da67a8-c2e3-4b99-b13f-74c08f0847fd";
+// URL now lives in integration_settings ("Receipt Link Webhook" on the
+// admin Integration Settings page) instead of hardcoded here.
+const RECEIPT_WEBHOOK_KEY = "highlevel_receipt_webhook_url";
 
 const countDisputable = (items = []) =>
   items.filter((i) => ["dispute", "associated", "non-linked"].includes(String(i.classification || "non-linked").trim().toLowerCase())).length;
@@ -95,11 +98,7 @@ export function useReceiptGenerator(clientId, agentDisplay, refetch, onRefresh) 
         event: "receipt_link_generated",
       };
 
-      try {
-        await fetch(RECEIPT_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      } catch {
-        await fetch(RECEIPT_WEBHOOK, { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
-      }
+      await sendHighLevelEvent(RECEIPT_WEBHOOK_KEY, payload);
 
       setPreview(null);
       addToast({ title: "Receipt Generated", message: "Receipt link created. Valid for 24 hours.", variant: "success", icon: "bi-check-circle" });

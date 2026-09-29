@@ -10,6 +10,7 @@ import { isBlankStartInquiries } from "../../utils/inquiryCounts";
 import { formatDurationBetween } from "../../utils/formatDuration";
 import { useFloatingDock } from "../../context/FloatingDockContext";
 import { CORNER_OFFSET, PIPELINE_LAUNCHER_BOTTOM } from "../../utils/floatingDock";
+import { sendHighLevelEvent } from "../../utils/highlevelWebhook";
 
 const QUEUE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -264,10 +265,10 @@ export default function ClientSubmissionListener() {
       });
 
       // --- TRIGGER WEBHOOK ---
+      // URL now lives in integration_settings ("Client Grabbed Webhook" on
+      // the admin Integration Settings page) instead of hardcoded here.
       try {
-        const WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/c96adb2a-4e80-4183-8292-175a44993269";
-
-        const payload = {
+        sendHighLevelEvent("highlevel_client_grabbed_webhook_url", {
             event: "client_grabbed",
             client_id: client.id,
             client_name: client.name,
@@ -277,14 +278,7 @@ export default function ClientSubmissionListener() {
             company_email: client.companyEmail,
             assigned_admin_id: user.id,
             grabbed_at: new Date().toISOString()
-        };
-
-        fetch(WEBHOOK_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-        }).catch(err => console.warn("Webhook network issue (non-fatal):", err));
-
+        });
       } catch (webhookErr) {
         console.error("Webhook payload error:", webhookErr);
       }

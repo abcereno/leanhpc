@@ -4,15 +4,14 @@ import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../shared/ui/ToastNotifier";
 
-import { 
-  CALLER_TYPES, CATEGORIES, SUB_ISSUES, REQUIRED_CHECKS, SCRIPTS_AND_ACTIONS 
-} from "../../utils/supportConstants"; 
+import {
+  CALLER_TYPES, CATEGORIES, SUB_ISSUES, REQUIRED_CHECKS, SCRIPTS_AND_ACTIONS
+} from "../../utils/supportConstants";
+import { sendHighLevelEvent } from "../../utils/highlevelWebhook";
 
-// ============================================================================
-// ⚙️ CONFIGURATION: Single Central Webhook URL
-// ============================================================================
-const WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/9ecfe892-5e69-4882-8b58-a6401bc839d3";
-// ============================================================================
+// URL now lives in integration_settings ("Support Console Webhook" on the
+// admin Integration Settings page) instead of hardcoded here.
+const WEBHOOK_KEY = "highlevel_support_console_webhook_url";
 
 export default function SupportConsole() {
   const { addToast } = useToast();
@@ -129,16 +128,12 @@ export default function SupportConsole() {
           const { data } = await supabase.from('clients').insert(newClientData).select().single();
           const attachedClient = data || { id: null, ...newClientData };
 
-          await fetch(WEBHOOK_URL, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ 
-                  source: "support_console_lead_capture",
-                  actionKey: isNewClient ? "New Client Registration" : "Potential Client Lead",
-                  fullName: newClientData.full_name, 
-                  email: newClientData.email, 
-                  phone: newClientData.phone
-              })
+          await sendHighLevelEvent(WEBHOOK_KEY, {
+              source: "support_console_lead_capture",
+              actionKey: isNewClient ? "New Client Registration" : "Potential Client Lead",
+              fullName: newClientData.full_name,
+              email: newClientData.email,
+              phone: newClientData.phone
           });
 
           handleAttachClient(attachedClient);
@@ -154,21 +149,20 @@ export default function SupportConsole() {
       setActionLoading(prev => ({ ...prev, [actionName]: true }));
       try {
           // 👇 Central Webhook with explicit 'actionKey' identifier 👇
-          await fetch(WEBHOOK_URL, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ 
-                  source: "support_console_action",
-                  actionKey: actionName, // e.g. "Send Payment Link", "Escalate to Sales", etc.
-                  fullName: selectedClient?.full_name || "Unknown", 
-                  email: selectedClient?.email || "", 
-                  phone: selectedClient?.phone || "", 
-                  clientId: selectedClient?.id || "Lead",
-                  category: selections.category,
-                  subIssue: selections.subIssue,
-                  adminId: userId
-              })
+          const result = await sendHighLevelEvent(WEBHOOK_KEY, {
+              source: "support_console_action",
+              actionKey: actionName, // e.g. "Send Payment Link", "Escalate to Sales", etc.
+              fullName: selectedClient?.full_name || "Unknown",
+              email: selectedClient?.email || "",
+              phone: selectedClient?.phone || "",
+              clientId: selectedClient?.id || "Lead",
+              category: selections.category,
+              subIssue: selections.subIssue,
+              adminId: userId
           });
+          // sendHighLevelEvent never throws, so check ok explicitly here to
+          // keep this button's original success/fail toast behavior.
+          if (result.ok === false) throw new Error(result.statusText || "Webhook send failed");
 
           addToast({ title: "Triggered", message: `Successfully triggered: ${actionName}`, variant: "success", icon: "bi-check-circle-fill" });
       } catch (err) {
@@ -192,17 +186,13 @@ export default function SupportConsole() {
             created_at: new Date().toISOString()
         });
 
-        await fetch(WEBHOOK_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-                source: "support_console_post_call",
-                actionKey: "Send Post Call Survey",
-                email: selectedClient?.email || "", 
-                fullName: selectedClient?.full_name || "Lead", 
-                phone: selectedClient?.phone || "", 
-                issue: selections.subIssue 
-            })
+        await sendHighLevelEvent(WEBHOOK_KEY, {
+            source: "support_console_post_call",
+            actionKey: "Send Post Call Survey",
+            email: selectedClient?.email || "",
+            fullName: selectedClient?.full_name || "Lead",
+            phone: selectedClient?.phone || "",
+            issue: selections.subIssue
         });
 
         setCallLogged(true);

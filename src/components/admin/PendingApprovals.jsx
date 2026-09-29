@@ -2,9 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { Container, Card, Table, Button, Badge, Tabs, Tab, Spinner, Alert } from 'react-bootstrap';
 import { supabase } from '../../supabaseClient';
 import { useConfirm } from '../shared/ui/ConfirmDialog';
+import { sendHighLevelEvent } from '../../utils/highlevelWebhook';
 
-// Define your webhook URL here
-const WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/99d2a895-5978-474b-8667-464e4a0c780b"; 
+// URL now lives in integration_settings ("Pending Approvals Webhook" on the
+// admin Integration Settings page) instead of hardcoded here.
+const WEBHOOK_KEY = "highlevel_pending_approvals_webhook_url";
 
 export default function PendingApprovals() {
   const { confirm } = useConfirm();
@@ -54,27 +56,18 @@ export default function PendingApprovals() {
           
         if (error) throw error;
 
-        // 2. Fire Webhook
-        try {
-          await fetch(WEBHOOK_URL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              event: 'user_approved',
-              table_type: table,
-              user_id: item.id,
-              name: item.full_name || item.company_name || item.affiliate_name,
-              email: item.email || item.contact_email,
-              phone: item.phone || item.contact_phone || '',
-              approved_at: new Date().toISOString()
-            })
-          });
-        } catch (webhookErr) {
-            console.error("Webhook failed to send, but database was updated:", webhookErr);
-            // We intentionally don't throw this error to the user, as the approval still succeeded in the database.
-        }
+        // 2. Fire Webhook (fire-and-forget — sendHighLevelEvent never
+        // throws, matching this call site's original intent that a
+        // webhook failure shouldn't affect the already-succeeded approval)
+        sendHighLevelEvent(WEBHOOK_KEY, {
+          event: 'user_approved',
+          table_type: table,
+          user_id: item.id,
+          name: item.full_name || item.company_name || item.affiliate_name,
+          email: item.email || item.contact_email,
+          phone: item.phone || item.contact_phone || '',
+          approved_at: new Date().toISOString()
+        });
 
         setMessage({ type: 'success', text: 'User approved successfully!' });
         

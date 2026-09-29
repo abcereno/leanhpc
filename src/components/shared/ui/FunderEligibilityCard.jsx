@@ -151,36 +151,26 @@ export default function FunderEligibilityCard({ clientId }) {
   useEffect(() => {
     if (parsedData) {
       try {
-        // Send strictly structured data to the Funder Rules Engine
+        // Send strictly structured data to the Funder Rules Engine.
+        // `settings` is already passed through as calculateFundingEligibility's
+        // userOptions param, so the engine's RULE 1 (utilization), RULE 2
+        // (account depth) and RULE 3 (inquiry velocity) all already run
+        // against the current slider values — nothing here needs to
+        // duplicate that.
+        //
+        // A local re-derivation used to run here and overwrite
+        // analysis.status with a "GREEN/YELLOW/RED" verdict computed from
+        // only those same 3 metrics — silently dropping RULE 4
+        // (derogatories) and RULE 5 (bankruptcy), which the engine DOES
+        // check and which are exactly what can force overallStatus to RED
+        // on their own. `analysis.score` (the "Stop / High Risk" text
+        // banner) was never touched by that override, so a client flagged
+        // RED purely for a derogatory/bankruptcy — with clean utilization,
+        // account depth and inquiries — showed a GREEN checkmark badge
+        // right next to a "STOP / HIGH RISK" label. Trusting the engine's
+        // own analysis directly (status, score and reasons together) keeps
+        // that badge/label pair from ever disagreeing again.
         const analysis = calculateFundingEligibility(parsedData, settings);
-        
-        // Recalculate dynamic inquiry windows based on slider settings
-        const cutoffDate = new Date();
-        cutoffDate.setMonth(cutoffDate.getMonth() - settings.inquiryMonths);
-        
-        let recentCount = 0;
-        parsedData.inquiries.forEach(inq => {
-            if (inq.date && new Date(inq.date) >= cutoffDate) recentCount++;
-        });
-
-        analysis.metrics.inquiries_total = parsedData.inquiries.length;
-        analysis.metrics.inquiries_recent = recentCount;
-
-        // Override status logic based on sliders
-        let newStatus = "GREEN";
-        if (analysis.metrics.utilization > settings.maxUtil) newStatus = "RED";
-        if (analysis.metrics.revolving_accounts < settings.minAccts) newStatus = newStatus === "RED" ? "RED" : "YELLOW";
-        if (analysis.metrics.inquiries_recent > settings.maxInqCount) newStatus = "RED";
-        
-        analysis.status = newStatus;
-        analysis.reasons = analysis.reasons.filter(r => !r.text.toLowerCase().includes('inquir'));
-        
-        if (recentCount > settings.maxInqCount) {
-            analysis.reasons.push({ status: "RED", text: `Too many recent inquiries (${recentCount} total across bureaus in last ${settings.inquiryMonths} months). Max allowed: ${settings.maxInqCount}.` });
-        } else {
-            analysis.reasons.push({ status: "GREEN", text: `Inquiries are within limits (${recentCount} total across bureaus in last ${settings.inquiryMonths} months).` });
-        }
-
         setResult(analysis);
         setAgeMetrics(calculateAgeMetrics(parsedData.accounts));
       } catch (e) {

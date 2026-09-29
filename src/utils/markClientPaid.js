@@ -12,15 +12,14 @@
 // never gets a Document Routing round or the payment webhook, and quietly
 // never enters the self-healing docs/calls workflow at all.
 import { supabase } from "../supabaseClient";
-import { sendWebhook } from "../hooks/useWebhookSender";
 import { SERVICES } from "./services";
 import { maybeAssignToRoselle } from "./fileReadiness";
-import { sendPaymentStatusChangedEvent } from "./highlevelWebhook";
+import { sendPaymentStatusChangedEvent, sendHighLevelEvent } from "./highlevelWebhook";
 
-const PAID_WEBHOOKS = [
-  "https://services.leadconnectorhq.com/hooks/rqr5oOzXxiHjh8wSS7T2/webhook-trigger/775e674e-e9dd-43df-852f-574865edcc84",
-  "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/236315bf-1d68-419b-b8aa-f6afaafcc39c",
-];
+// URLs now live in integration_settings ("Mark Paid Webhook 1"/"Mark Paid
+// Webhook 2" on the admin Integration Settings page) instead of hardcoded
+// here — two distinct GHL destinations that both fire on every paid event.
+const PAID_WEBHOOK_KEYS = ["highlevel_paid_webhook_1_url", "highlevel_paid_webhook_2_url"];
 
 /**
  * Marks a client paid: resets bureau statuses to NEW/incomplete, creates
@@ -97,9 +96,7 @@ export async function markClientPaid(clientId, client, { triggerSource = "manual
   const guaranteedClientEmail = client.email || `quickimport-${clientId.substring(0, 8)}@pending.com`;
   const payload = { ...client, email: guaranteedClientEmail, is_paid: true, paid_at: now, trigger_source: triggerSource, company_email: companyEmail };
 
-  await Promise.all(PAID_WEBHOOKS.map((url) =>
-    sendWebhook(payload, url).catch((e) => console.error(`Webhook failed: ${e.message}`))
-  ));
+  await Promise.all(PAID_WEBHOOK_KEYS.map((key) => sendHighLevelEvent(key, payload)));
 
   // Fire-and-forget: this is the ONE shared path every "mark paid" flow in
   // the app already goes through (see this file's own header comment on

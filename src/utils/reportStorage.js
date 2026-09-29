@@ -1,9 +1,13 @@
 // src/utils/reportStorage.js
 import { supabase } from "../supabaseClient";
 import { detectProfileChanges } from "./creditAnalysis";
+import { sendHighLevelEvent } from "./highlevelWebhook";
 
 const BUCKET = "clients";
-const DELTA_WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/423af280-1504-4014-9f5e-f10b9bbc0985"; 
+// Same destination as completionWebhook.js's "Bureau Completion Webhook"
+// (integration_settings key highlevel_completion_webhook_url) — this used
+// to be its own separate hardcoded copy of that same URL literal.
+const DELTA_WEBHOOK_KEY = "highlevel_completion_webhook_url";
 
 // --- NOTIFICATION CONTENT DICTIONARY ---
 const NOTIFICATION_CONTENT = {
@@ -100,18 +104,14 @@ export async function saveUpdateAudit(clientId, rawJson, auditReport, provider =
                 // 2. FIRE WEBHOOK FOR EMAILS
                 const { data: clientData } = await supabase.from('clients').select('full_name, email, phone').eq('id', clientId).single();
                 
-                await fetch(DELTA_WEBHOOK_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        client_id: clientId,
-                        client_name: clientData?.full_name || "Client",
-                        client_email: clientData?.email || "",
-                        client_phone: clientData?.phone || "",
-                        detected_events: detectedEvents, 
-                        timestamp: new Date().toISOString()
-                    })
-                }).catch(err => console.error("Webhook failed to send:", err));
+                sendHighLevelEvent(DELTA_WEBHOOK_KEY, {
+                    client_id: clientId,
+                    client_name: clientData?.full_name || "Client",
+                    client_email: clientData?.email || "",
+                    client_phone: clientData?.phone || "",
+                    detected_events: detectedEvents,
+                    timestamp: new Date().toISOString()
+                });
             }
         }
     } catch (e) {

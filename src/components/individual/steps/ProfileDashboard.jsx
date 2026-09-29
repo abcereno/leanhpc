@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Container, Row, Col, Card, Button, Dropdown, ButtonGroup, Table, Badge, ListGroup, Alert, Spinner, Modal, Tab, Nav, Ratio, Form } from "react-bootstrap";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../../../supabaseClient";
+import { sendHighLevelEvent } from "../../../utils/highlevelWebhook";
 
 // 👇 Local Video Assets
 import step1 from "../../../assets/videos/step1.mp4";
@@ -155,12 +156,10 @@ export default function ProfileDashboard({ client, clientId, auditReport, user, 
         if (error) throw error;
         
         try {
-            const webhookUrl = "https://services.leadconnectorhq.com/hooks/4tb8QYdUxvRnyNgCIUTD/webhook-trigger/36c7c9da-355a-46ad-826b-2b378a560212";
-            await fetch(webhookUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email: client?.email, fullName: client?.full_name, phone: client?.phone || "", source: "client_dashboard_help_request", clientId: clientId })
-            });
+            // Same "Individual Portal Webhook" integration_settings URL as
+            // IndividualLayout.jsx's own help-request/payment handlers —
+            // this used to be its own separate hardcoded copy of that URL.
+            await sendHighLevelEvent("highlevel_individual_webhook_url", { email: client?.email, fullName: client?.full_name, phone: client?.phone || "", source: "client_dashboard_help_request", clientId: clientId });
         } catch (webhookErr) { console.error("❌ Failed to send admin help webhook:", webhookErr); }
         
         addToast({ title: "Request Sent", message: "An admin has been notified and will review your file shortly.", variant: "success", icon: "bi-check-circle-fill" });
