@@ -257,6 +257,17 @@ export default function CsDashboard2() {
   const [loading, setLoading] = useState(true);
   const [migrationMissing, setMigrationMissing] = useState(false);
   const [calls, setCalls] = useState([]);
+  // Real, persisted checklist backing the Tasks nav section — see
+  // sql/add_cs_call_tasks.sql. Each row also carries its parent call's
+  // contact/phone/called_by via the embedded select below, joined once
+  // here instead of re-deriving it per row in the UI.
+  const [callTasks, setCallTasks] = useState([]);
+  const [callTasksMigrationMissing, setCallTasksMigrationMissing] = useState(false);
+  // Notification bell feed — the shared `notifications` table, scoped to
+  // LTOS via company_id (sql/add_notifications_company_scope.sql).
+  const [notifications, setNotifications] = useState([]);
+  const [notificationsMigrationMissing, setNotificationsMigrationMissing] = useState(false);
+  const [showNotificationsPanel, setShowNotificationsPanel] = useState(false);
   const [payingClients, setPayingClients] = useState([]);
   // Unpaid LTOS clients — includes anyone who signed up as an individual
   // (see the file header comment). These are `clients` rows, not
@@ -291,6 +302,12 @@ export default function CsDashboard2() {
   // Cleared on close so the next "+ Log New Call" (no row context) opens
   // blank again.
   const [prefillContactValue, setPrefillContactValue] = useState("");
+  // Non-null when the Log Call modal is editing an existing cs_call_log
+  // row (opened from the details drawer's Edit button) instead of
+  // creating a new one — same modal/form, just a different submit branch
+  // in handleSaveCall, so the field list never has to be kept in sync
+  // between two separate forms.
+  const [editingCallId, setEditingCallId] = useState(null);
   const formRef = useRef(null);
 
   // Filters (Call Log section)
@@ -372,6 +389,54 @@ export default function CsDashboard2() {
         setAdminNamesById(new Map((adminRows || []).map((a) => [a.id, a.full_name])));
       } else {
         setAdminNamesById(new Map());
+      }
+
+      // Tasks nav section's real data — see sql/add_cs_call_tasks.sql.
+      // Soft-fail independently of the rest of this function (same
+      // migration-not-run-yet pattern as cs_call_log above) so a database
+      // that hasn't been migrated for this yet doesn't blank the whole
+      // dashboard, just the Tasks section.
+      const tasksRes = await supabase
+        .from("cs_call_tasks")
+        .select("*, cs_call_log ( id, phone, called_by_name, follow_up_date, clients ( full_name ), leads:company_leads ( full_name ) )")
+        .order("is_done", { ascending: true })
+        .order("due_date", { ascending: true, nullsFirst: false });
+      if (tasksRes.error) {
+        if (/cs_call_tasks/i.test(tasksRes.error.message || "")) {
+          setCallTasksMigrationMissing(true);
+          setCallTasks([]);
+        } else {
+          console.error("Failed to load cs_call_tasks:", tasksRes.error);
+          setCallTasks([]);
+        }
+      } else {
+        setCallTasksMigrationMissing(false);
+        setCallTasks(tasksRes.data || []);
+      }
+
+      // Notification bell's real data — see
+      // sql/add_notifications_company_scope.sql. Same independent
+      // soft-fail: the `notifications` table predates any tracked
+      // migration, so a database that hasn't run that migration yet
+      // (no company_id column) should just show an empty bell, not break
+      // the page.
+      const notificationsRes = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("company_id", LTOS_COMPANY_ID)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (notificationsRes.error) {
+        if (/notifications|company_id/i.test(notificationsRes.error.message || "")) {
+          setNotificationsMigrationMissing(true);
+          setNotifications([]);
+        } else {
+          console.error("Failed to load notifications:", notificationsRes.error);
+          setNotifications([]);
+        }
+      } else {
+        setNotificationsMigrationMissing(false);
+        setNotifications(notificationsRes.data || []);
       }
     } catch (err) {
       console.error("CsDashboard2 load error:", err);
@@ -457,19 +522,24 @@ export default function CsDashboard2() {
     () => records.filter((r) => r.followUpIso).slice().sort((a, b) => compareIsoDates(a.followUpIso, b.followUpIso)),
     [records]
   );
+  // Real, persisted tasks (sql/add_cs_call_tasks.sql) — replaces the old
+  // purely-derived, un-persisted version that re-flattened every call's
+  // next_steps array fresh on every render and forgot any checked-off
+  // state on refresh. Not-done tasks first, then soonest-due, matching
+  // the query's own ordering (see loadData).
   const tasksData = useMemo(
     () =>
-      records.flatMap((r) =>
-        (r.nextSteps || []).map((step, index) => ({
-          id: `${r.id}-${index}`,
-          contactName: r.name,
-          phone: r.phone,
-          calledBy: r.calledBy,
-          dueDate: r.followUp !== "—" ? r.followUp : "No due date",
-          task: step,
-        }))
-      ),
-    [records]
+      callTasks.map((t) => ({
+        id: t.id,
+        callId: t.call_id,
+        contactName: t.cs_call_log?.clients?.full_name || t.cs_call_log?.leads?.full_name || "Unknown Contact",
+        phone: t.cs_call_log?.phone || "—",
+        calledBy: t.cs_call_log?.called_by_name || "—",
+        dueDate: t.due_date ? formatDateForDisplay(t.due_date) : "No due date",
+        task: t.task,
+        isDone: t.is_done,
+      })),
+    [callTasks]
   );
   const calendarData = useMemo(
     () =>
@@ -628,19 +698,59 @@ export default function CsDashboard2() {
   const callerGroups = useMemo(() => groupCounts(records, (r) => r.calledBy), [records]);
 
   // --- Actions ---
-  const openLogModal = () => setShowLogModal(true);
+  const openLogModal = () => { setEditingCallId(null); setShowLogModal(true); };
   // Opened from a specific client/lead row's own "Log Call" button —
   // pre-selects that contact in the combined picker below (see
   // prefillContactValue's own comment for why this has to be set BEFORE
   // the modal — and a fresh SearchableSelect instance — mounts).
   const logCallFor = (contactType, id) => {
+    setEditingCallId(null);
     setPrefillContactValue(`${contactType}:${id}`);
+    setShowLogModal(true);
+  };
+  // Opened from the details drawer's Edit button — same modal, but
+  // pre-filled from the raw cs_call_log row (see editingCall below) and
+  // submitting runs the update branch in handleSaveCall instead of insert.
+  const openEditModal = (record) => {
+    setEditingCallId(record.id);
+    setPrefillContactValue(`${record.contactType}:${record.contactType === "lead" ? record.leadId : record.clientId}`);
     setShowLogModal(true);
   };
   const closeLogModal = () => {
     setShowLogModal(false);
     setPrefillContactValue("");
+    setEditingCallId(null);
     formRef.current?.reset();
+  };
+  // Raw (unformatted) cs_call_log row backing the modal when editing —
+  // `records` above only carries display-formatted date/time strings, not
+  // the raw values the form's date/time inputs need as defaultValue.
+  const editingCall = useMemo(() => calls.find((c) => c.id === editingCallId) || null, [calls, editingCallId]);
+
+  // Keeps cs_call_tasks (sql/add_cs_call_tasks.sql) — the Tasks nav
+  // section's real backing store — in sync with a call's next_steps text
+  // whenever a call is created or edited. Not-yet-done tasks whose text
+  // was removed from the edited list are deleted; already-done tasks are
+  // always kept as history even if the step text later changes; new step
+  // text becomes a new, not-done task. Best-effort: a database that
+  // hasn't run that migration yet just skips this silently rather than
+  // blocking the call save itself.
+  const syncCallTasks = async (callId, nextSteps, followUpDate) => {
+    try {
+      const { data: existing, error: fetchErr } = await supabase.from("cs_call_tasks").select("id, task, is_done").eq("call_id", callId);
+      if (fetchErr) throw fetchErr;
+      const existingTasks = existing || [];
+      const stepsSet = new Set(nextSteps);
+      const existingTextSet = new Set(existingTasks.map((t) => t.task));
+
+      const toInsert = nextSteps.filter((s) => !existingTextSet.has(s)).map((task) => ({ call_id: callId, task, due_date: followUpDate }));
+      if (toInsert.length > 0) await supabase.from("cs_call_tasks").insert(toInsert);
+
+      const toDeleteIds = existingTasks.filter((t) => !t.is_done && !stepsSet.has(t.task)).map((t) => t.id);
+      if (toDeleteIds.length > 0) await supabase.from("cs_call_tasks").delete().in("id", toDeleteIds);
+    } catch (err) {
+      console.warn("cs_call_tasks sync skipped (run sql/add_cs_call_tasks.sql?):", err.message || err);
+    }
   };
 
   const handleSaveCall = async (e) => {
@@ -661,6 +771,7 @@ export default function CsDashboard2() {
       ? leads.find((l) => l.id === contactId)
       : payingClients.find((c) => c.id === contactId) || unpaidClients.find((c) => c.id === contactId);
     const nextStepsInput = String(formData.get("nextStepsInput") || "").trim();
+    const nextSteps = nextStepsInput ? nextStepsInput.split(",").map((s) => s.trim()).filter(Boolean) : [];
 
     const payload = {
       client_id: isLead ? null : contactId,
@@ -676,19 +787,34 @@ export default function CsDashboard2() {
       lead_status: String(formData.get("leadStatus") || "").trim() || null,
       summary: String(formData.get("summary") || "").trim() || null,
       internal_notes: String(formData.get("internalNotes") || "").trim() || null,
-      next_steps: nextStepsInput ? nextStepsInput.split(",").map((s) => s.trim()).filter(Boolean) : [],
+      next_steps: nextSteps,
     };
 
     setSaving(true);
     try {
-      const { data, error } = await supabase
-        .from("cs_call_log")
-        .insert(payload)
+      const query = editingCallId
+        ? supabase.from("cs_call_log").update(payload).eq("id", editingCallId)
+        : supabase.from("cs_call_log").insert(payload);
+      const { data, error } = await query
         .select("*, clients ( id, full_name, phone, email ), leads:company_leads ( id, full_name, phone, email, computed_status )")
         .single();
       if (error) throw error;
-      setCalls((prev) => [data, ...prev]);
-      addToast({ title: "Call Logged", message: `Call with ${matchedContact?.full_name || "contact"} saved.`, variant: "success", icon: "bi-telephone-fill" });
+
+      if (editingCallId) {
+        setCalls((prev) => prev.map((c) => (c.id === editingCallId ? data : c)));
+        addToast({ title: "Call Updated", message: `Call with ${matchedContact?.full_name || "contact"} updated.`, variant: "success", icon: "bi-pencil-fill" });
+      } else {
+        setCalls((prev) => [data, ...prev]);
+        addToast({ title: "Call Logged", message: `Call with ${matchedContact?.full_name || "contact"} saved.`, variant: "success", icon: "bi-telephone-fill" });
+      }
+      await syncCallTasks(data.id, nextSteps, payload.follow_up_date);
+      const tasksRes = await supabase
+        .from("cs_call_tasks")
+        .select("*, cs_call_log ( id, phone, called_by_name, follow_up_date, clients ( full_name ), leads:company_leads ( full_name ) )")
+        .order("is_done", { ascending: true })
+        .order("due_date", { ascending: true, nullsFirst: false });
+      if (!tasksRes.error) setCallTasks(tasksRes.data || []);
+
       closeLogModal();
       setActiveSection("call-log");
       setSelectedCallId(data.id);
@@ -698,6 +824,27 @@ export default function CsDashboard2() {
       addToast({ title: "Save Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Toggles one persisted task's done state (sql/add_cs_call_tasks.sql) —
+  // backs the Tasks nav section's checkboxes.
+  const toggleTask = async (task) => {
+    const nextIsDone = !task.isDone;
+    setCallTasks((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...t, is_done: nextIsDone, completed_at: nextIsDone ? new Date().toISOString() : null } : t))
+    );
+    try {
+      const { error } = await supabase
+        .from("cs_call_tasks")
+        .update({ is_done: nextIsDone, completed_at: nextIsDone ? new Date().toISOString() : null, completed_by: nextIsDone ? user?.id || null : null })
+        .eq("id", task.id);
+      if (error) throw error;
+    } catch (err) {
+      console.error("Toggle task failed:", err);
+      addToast({ title: "Failed", message: err.message, variant: "danger", icon: "bi-exclamation-triangle-fill" });
+      // Roll back the optimistic flip.
+      setCallTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, is_done: task.isDone } : t)));
     }
   };
 
@@ -715,6 +862,23 @@ export default function CsDashboard2() {
     ],
     [payingClients, unpaidClients, leads]
   );
+
+  // --- Notifications (sql/add_notifications_company_scope.sql) ---
+  const unreadNotificationsCount = useMemo(() => notifications.filter((n) => n.status === "unread").length, [notifications]);
+
+  const markNotificationRead = async (id) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, status: "read" } : n)));
+    const { error } = await supabase.from("notifications").update({ status: "read" }).eq("id", id);
+    if (error) console.error("Failed to mark notification read:", error);
+  };
+
+  const markAllNotificationsRead = async () => {
+    const unreadIds = notifications.filter((n) => n.status === "unread").map((n) => n.id);
+    if (unreadIds.length === 0) return;
+    setNotifications((prev) => prev.map((n) => ({ ...n, status: "read" })));
+    const { error } = await supabase.from("notifications").update({ status: "read" }).in("id", unreadIds);
+    if (error) console.error("Failed to mark all notifications read:", error);
+  };
 
   // CS sends the invoice themselves — this is the one write action they
   // take on a File Status row directly (the doc checklist is read-only,
@@ -1019,9 +1183,9 @@ export default function CsDashboard2() {
                 </div>
                 <div className="csd2-top-actions">
                   <button className="csd2-primary-btn" type="button" onClick={openLogModal}>＋ Log New Call</button>
-                  <button className="csd2-notification" type="button" title="Notifications" onClick={() => addToast({ title: "Notifications", message: "No new notifications.", variant: "info", icon: "bi-bell-fill" })}>
+                  <button className="csd2-notification" type="button" title="Notifications" onClick={() => setShowNotificationsPanel(true)}>
                     🔔
-                    <span className="csd2-notification-badge">{records.length}</span>
+                    {unreadNotificationsCount > 0 && <span className="csd2-notification-badge">{unreadNotificationsCount}</span>}
                   </button>
                 </div>
               </div>
@@ -1277,25 +1441,34 @@ export default function CsDashboard2() {
           {activeSection === "tasks" && (
             <section>
               <div className="csd2-panel-head"><h2 className="csd2-section-title" style={{ margin: 0 }}>Tasks</h2></div>
-              <div className="csd2-card csd2-panel-body">
-                {tasksData.length === 0 ? (
-                  <EmptyState title="No tasks yet" message="Tasks appear from the Next Steps field in your calls." />
-                ) : (
-                  <div className="csd2-list-stack">
-                    {tasksData.map((t) => (
-                      <div className="csd2-list-item" key={t.id}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <input type="checkbox" />
-                          <div>
-                            <div className="csd2-list-item-title">{t.task}</div>
-                            <div className="csd2-list-item-sub">{t.contactName} · {t.phone || "—"} · {t.dueDate}</div>
+              {callTasksMigrationMissing ? (
+                <div className="csd2-migration-notice">
+                  <strong>Setup needed:</strong> the <code>cs_call_tasks</code> table doesn't exist yet. Run{" "}
+                  <code>sql/add_cs_call_tasks.sql</code> against the database, then reload this page.
+                </div>
+              ) : (
+                <div className="csd2-card csd2-panel-body">
+                  {tasksData.length === 0 ? (
+                    <EmptyState title="No tasks yet" message="Tasks appear from the Next Steps field in your calls." />
+                  ) : (
+                    <div className="csd2-list-stack">
+                      {tasksData.map((t) => (
+                        <div className="csd2-list-item" key={t.id}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <input type="checkbox" checked={t.isDone} onChange={() => toggleTask(t)} />
+                            <div>
+                              <div className="csd2-list-item-title" style={t.isDone ? { textDecoration: "line-through", opacity: 0.6 } : undefined}>
+                                {t.task}
+                              </div>
+                              <div className="csd2-list-item-sub">{t.contactName} · {t.phone || "—"} · {t.dueDate}</div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
           )}
 
@@ -1525,7 +1698,7 @@ export default function CsDashboard2() {
               </div>
 
               <div className="csd2-details-actions">
-                <button className="csd2-secondary-btn" type="button" onClick={() => addToast({ title: "Coming Soon", message: "Editing a logged call isn't wired up yet in this preview.", variant: "info", icon: "bi-info-circle-fill" })}>
+                <button className="csd2-secondary-btn" type="button" onClick={() => openEditModal(selectedRecord)}>
                   ✎ Edit
                 </button>
                 <button className="csd2-cta-btn" type="button" onClick={openLogModal}>📞 Log Another Call</button>
@@ -1539,11 +1712,15 @@ export default function CsDashboard2() {
         <div className="csd2-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeLogModal(); }}>
           <div className="csd2-modal">
             <div className="csd2-modal-header">
-              <h2>Log New Call</h2>
+              <h2>{editingCallId ? "Edit Call" : "Log New Call"}</h2>
               <button className="csd2-close-btn" type="button" onClick={closeLogModal}>×</button>
             </div>
             <div className="csd2-modal-body">
-              <form ref={formRef} onSubmit={handleSaveCall}>
+              {/* Keyed by editingCallId so switching between a blank "new
+                  call" form and an existing call's data remounts every
+                  uncontrolled input with the right defaultValue instead of
+                  keeping whatever was last typed. */}
+              <form ref={formRef} onSubmit={handleSaveCall} key={editingCallId || "new"}>
                 <div className="csd2-modal-grid">
                   <div className="csd2-field csd2-full">
                     <label>Client or Lead</label>
@@ -1558,65 +1735,67 @@ export default function CsDashboard2() {
 
                   <div className="csd2-field">
                     <label htmlFor="csd2Phone">Phone</label>
-                    <input id="csd2Phone" name="phone" type="text" placeholder="Defaults to contact's phone on file" />
+                    <input id="csd2Phone" name="phone" type="text" defaultValue={editingCall?.phone || ""} placeholder="Defaults to contact's phone on file" />
                   </div>
 
                   <div className="csd2-field">
                     <label htmlFor="csd2CallDate">Date</label>
-                    <input id="csd2CallDate" name="callDate" type="date" defaultValue={todayIsoDay()} required />
+                    <input id="csd2CallDate" name="callDate" type="date" defaultValue={editingCall?.call_date || todayIsoDay()} required />
                   </div>
 
                   <div className="csd2-field">
                     <label htmlFor="csd2CallTime">Time</label>
-                    <input id="csd2CallTime" name="callTime" type="time" />
+                    <input id="csd2CallTime" name="callTime" type="time" defaultValue={editingCall?.call_time || ""} />
                   </div>
 
                   <div className="csd2-field">
                     <label htmlFor="csd2Outcome">Outcome</label>
-                    <select id="csd2Outcome" name="outcome" defaultValue="Interested" required>
+                    <select id="csd2Outcome" name="outcome" defaultValue={editingCall?.outcome || "Interested"} required>
                       {OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
                     </select>
                   </div>
 
                   <div className="csd2-field">
                     <label htmlFor="csd2FollowUp">Follow Up Date</label>
-                    <input id="csd2FollowUp" name="followUpDate" type="date" />
+                    <input id="csd2FollowUp" name="followUpDate" type="date" defaultValue={editingCall?.follow_up_date || ""} />
                   </div>
 
                   <div className="csd2-field">
                     <label htmlFor="csd2CalledBy">Called By</label>
-                    <input id="csd2CalledBy" name="calledBy" type="text" defaultValue={displayName} />
+                    <input id="csd2CalledBy" name="calledBy" type="text" defaultValue={editingCall?.called_by_name || displayName} />
                   </div>
 
                   <div className="csd2-field">
                     <label htmlFor="csd2Source">Source</label>
-                    <input id="csd2Source" name="source" type="text" placeholder="Website, ad, referral..." />
+                    <input id="csd2Source" name="source" type="text" defaultValue={editingCall?.source || ""} placeholder="Website, ad, referral..." />
                   </div>
 
                   <div className="csd2-field">
                     <label htmlFor="csd2LeadStatus">Lead Status</label>
-                    <input id="csd2LeadStatus" name="leadStatus" type="text" placeholder="e.g. At risk, Renewal..." />
+                    <input id="csd2LeadStatus" name="leadStatus" type="text" defaultValue={editingCall?.lead_status || ""} placeholder="e.g. At risk, Renewal..." />
                   </div>
 
                   <div className="csd2-field">
                     <label htmlFor="csd2NextSteps">Next Steps</label>
-                    <input id="csd2NextSteps" name="nextStepsInput" type="text" placeholder="Comma separated" />
+                    <input id="csd2NextSteps" name="nextStepsInput" type="text" defaultValue={(editingCall?.next_steps || []).join(", ")} placeholder="Comma separated" />
                   </div>
 
                   <div className="csd2-field csd2-full">
                     <label htmlFor="csd2Summary">Call Summary</label>
-                    <textarea id="csd2Summary" name="summary" placeholder="Write call notes here..." />
+                    <textarea id="csd2Summary" name="summary" defaultValue={editingCall?.summary || ""} placeholder="Write call notes here..." />
                   </div>
 
                   <div className="csd2-field csd2-full">
                     <label htmlFor="csd2InternalNotes">Internal Notes</label>
-                    <textarea id="csd2InternalNotes" name="internalNotes" placeholder="Private notes..." />
+                    <textarea id="csd2InternalNotes" name="internalNotes" defaultValue={editingCall?.internal_notes || ""} placeholder="Private notes..." />
                   </div>
                 </div>
 
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 18 }}>
                   <button className="csd2-secondary-btn" type="button" onClick={closeLogModal} disabled={saving}>Cancel</button>
-                  <button className="csd2-cta-btn" type="submit" disabled={saving}>{saving ? "Saving..." : "Save Call"}</button>
+                  <button className="csd2-cta-btn" type="submit" disabled={saving}>
+                    {saving ? "Saving..." : editingCallId ? "Update Call" : "Save Call"}
+                  </button>
                 </div>
               </form>
             </div>
@@ -1779,6 +1958,50 @@ export default function CsDashboard2() {
                     <button className="csd2-cta-btn" type="button" onClick={submitOnboardPartner} disabled={saving}>
                       {saving ? "Adding..." : "Add Partner"}
                     </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNotificationsPanel && (
+        <div className="csd2-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowNotificationsPanel(false); }}>
+          <div className="csd2-modal">
+            <div className="csd2-modal-header">
+              <h2>Notifications</h2>
+              <button className="csd2-close-btn" type="button" onClick={() => setShowNotificationsPanel(false)}>×</button>
+            </div>
+            <div className="csd2-modal-body">
+              {notificationsMigrationMissing ? (
+                <div className="csd2-migration-notice">
+                  Run <code>sql/add_notifications_company_scope.sql</code> against the database, then reload this page.
+                </div>
+              ) : notifications.length === 0 ? (
+                <EmptyState title="No notifications" message="You're all caught up." />
+              ) : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+                    <button className="csd2-secondary-btn" type="button" onClick={markAllNotificationsRead} disabled={unreadNotificationsCount === 0}>
+                      Mark all read
+                    </button>
+                  </div>
+                  <div className="csd2-list-stack">
+                    {notifications.map((n) => (
+                      <div
+                        className="csd2-list-item"
+                        key={n.id}
+                        style={{ cursor: n.status === "unread" ? "pointer" : "default", opacity: n.status === "unread" ? 1 : 0.65 }}
+                        onClick={() => n.status === "unread" && markNotificationRead(n.id)}
+                      >
+                        <div className="csd2-list-item-head">
+                          <div className="csd2-list-item-title">{n.message}</div>
+                          {n.status === "unread" && <span className="csd2-badge csd2-status-yellow">New</span>}
+                        </div>
+                        <div className="csd2-subtle">{n.type} · {new Date(n.created_at).toLocaleString()}</div>
+                      </div>
+                    ))}
                   </div>
                 </>
               )}
