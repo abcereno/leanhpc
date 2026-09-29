@@ -209,6 +209,28 @@
   color: var(--csd2-sb-text);
 }
 
+.csd2-logout-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--csd2-sb-border);
+  background: transparent;
+  color: var(--csd2-sb-text);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.csd2-logout-btn:hover {
+  background: rgba(220, 53, 69, 0.15);
+  color: #ff8a97;
+  border-color: rgba(220, 53, 69, 0.4);
+}
+
 .csd2-avatar {
   width: 44px;
   height: 44px;

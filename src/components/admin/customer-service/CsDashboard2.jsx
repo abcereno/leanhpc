@@ -242,9 +242,17 @@ async function selectResilient(table, columns, applyFilters) {
 }
 
 export default function CsDashboard2() {
-  const { user, fullName } = useAuth();
+  const { user, fullName, signOut } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
+
+  // Same pattern as AdminNavbar.jsx's handleLogout — this dashboard has no
+  // shared navbar of its own (it's a standalone shell, see the file header
+  // comment), so it didn't get a logout button at all until now.
+  const handleLogout = async () => {
+    await signOut();
+    navigate("/login", { replace: true });
+  };
 
   const [loading, setLoading] = useState(true);
   const [migrationMissing, setMigrationMissing] = useState(false);
@@ -914,6 +922,14 @@ export default function CsDashboard2() {
               <div style={{ fontWeight: 800 }}>{displayName}</div>
               <div className="csd2-sub">Staff</div>
             </div>
+            <button
+              type="button"
+              className="csd2-logout-btn"
+              title="Sign Out"
+              onClick={handleLogout}
+            >
+              <i className="bi bi-box-arrow-right" />
+            </button>
           </div>
         </aside>
 
@@ -1032,7 +1048,9 @@ export default function CsDashboard2() {
                     {OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
                   <input className="csd2-input" type="text" placeholder="Search date text..." value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
-                  <button className="csd2-filter-btn" type="button" onClick={() => {}}>Apply</button>
+                  {/* No "Apply" button — filtering already runs live off the
+                      inputs above (filteredRecords' useMemo), so a separate
+                      apply step would just be a dead click. */}
                   <button className="csd2-filter-btn" type="button" onClick={() => { setSearch(""); setOutcomeFilter("all"); setDateFilter(""); }}>Reset</button>
                 </div>
 
