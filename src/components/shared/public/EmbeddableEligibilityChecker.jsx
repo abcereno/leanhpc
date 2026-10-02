@@ -5,6 +5,7 @@ import { parseSmartCredit } from "../../../utils/parseSmartCredit";
 import { supabase } from "../../../supabaseClient";
 import { useToast } from "../ui/ToastNotifier";
 import { LTOS_COMPANY_ID } from "../../../utils/companies";
+import { IDIQ_SERVICE_URL } from "../../../utils/idiqService";
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 const addId = (item) => ({
@@ -154,7 +155,7 @@ export default function EmbeddableEligibilityChecker() {
                       }
 
                   } else if (provider === "IdentityIQ") {
-                      const res = await fetch("https://backend-4uir.onrender.com/loginidiq", {
+                      const res = await fetch(IDIQ_SERVICE_URL, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ email: username, password, pin: securityWord, ssn: "" }),

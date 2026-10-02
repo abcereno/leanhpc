@@ -5,6 +5,7 @@ import { calculateFundingEligibility } from "../../../utils/funderRules";
 import { parseSmartCredit } from "../../../utils/parseSmartCredit";
 import { deriveServiceId } from "../../../utils/services";
 import { LTOS_COMPANY_ID } from "../../../utils/companies";
+import { IDIQ_SERVICE_URL } from "../../../utils/idiqService";
 
 const BUCKET_NAME = "clients"; 
 
@@ -251,7 +252,7 @@ const [settings, setSettings] = useState({ inquiryMonths: 6, maxInqCount: 2, max
                       cleanParsedData = isRaw ? parseSmartCredit(payload) : payload;
 
                   } else if (provider === "IdentityIQ") {
-                      const res = await fetch("https://backend-4uir.onrender.com/loginidiq", {
+                      const res = await fetch(IDIQ_SERVICE_URL, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ email: username, password, pin: securityWord, ssn: "" }),

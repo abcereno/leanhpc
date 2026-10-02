@@ -9,6 +9,7 @@ import PdfPreviewModal from "../ui/PdfPreviewModal";
 import { delay, waitForImages, pagesToImages, imagesToPdf } from "../../../utils/pdfExport";
 import { paginateFromPrintRoot, destroyPaginatedPortal } from "../../../utils/paginateDom";
 import { useToast } from "../ui/ToastNotifier";
+import { IDIQ_SERVICE_URL } from "../../../utils/idiqService";
 
 // --- HELPER: UNIVERSAL SCORE EXTRACTOR (STRICTLY NUMBERS) ---
 const extractScoresSafely = (rawData, cleanData) => {
@@ -191,7 +192,7 @@ export default function ClientReportPage(props) {
 
             rawReportData = anJson;
           } else if (provider === "IdentityIQ") {
-            const res = await fetch("https://backend-4uir.onrender.com/loginidiq", {
+            const res = await fetch(IDIQ_SERVICE_URL, {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ email: username, password, pin: securityWord, ssn: "" }),
             });

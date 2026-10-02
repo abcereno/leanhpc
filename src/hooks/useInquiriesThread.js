@@ -14,6 +14,8 @@ import {
 import { computeWeightedProgress } from "../utils/progressWeighting";
 import { syncCountReviewRequests, buildApprovedCountsForApprover } from "../utils/countReviewSync";
 import { formatDurationBetween } from "../utils/formatDuration";
+import { classifyInquiriesWithRules } from "../utils/inquiryCountRules";
+import { fetchLenderAliases } from "../utils/classifyInquiries";
 import { useToast } from "../components/shared/ui/ToastNotifier";
 import { useConfirm } from "../components/shared/ui/ConfirmDialog";
 import { sendFullCompletionWebhook, sendBureauCompletionWebhook } from "../utils/completionWebhook";
@@ -78,6 +80,12 @@ export default function useInquiriesThread({
   const [activeTab, setActiveTab] = useState("All");
   const [accountTab, setAccountTab] = useState("All");
   const [isGenerating, setIsGenerating] = useState(false);
+  // "Analyze Inquiries" button (InquiriesThread.jsx) — runs the
+  // deterministic HPC Inquiry Count Rules engine (see
+  // utils/inquiryCountRules.js) and auto-applies the result, replacing the
+  // old AIAnalysisModal review-first flow entirely per the user's decision
+  // to drop the GPT-4-turbo classifier in favor of this rule set.
+  const [runningCountRules, setRunningCountRules] = useState(false);
 
   const startTimeRef = useRef(null);
   const previousThreadRef = useRef({ accounts: [], experian: [], transunion: [], equifax: [] });
@@ -777,6 +785,56 @@ export default function useInquiriesThread({
 
   }, [inquiries, updateCounts_, saveUpdatedThread]);
 
+  // "Analyze Inquiries" — replaces the old AI Analysis button
+  // (AIAnalysisModal.jsx -> analyze-inquiries Edge Function, review-then-
+  // accept UI) with the deterministic HPC Inquiry Count Rules engine
+  // (1A/1B/RP/DL/CX/2A — see utils/inquiryCountRules.js). Deterministic
+  // means the same report always produces the same count, so unlike the AI
+  // flow this auto-applies and saves immediately instead of staging
+  // suggestions for manual accept/reject — same "compute -> setInquiries ->
+  // saveUpdatedThread" shape as markAllNonLinkedAsDeleted/markAllNonLinkedAsDND
+  // above, for the same realtime-UI-refresh reason (setInquiries re-renders
+  // immediately; saveUpdatedThread persists + recomputes progress/webhooks).
+  //
+  // Already-"deleted"/"dnd" inquiries are left untouched — those represent
+  // a staff decision already acted on (removed from the file, or formally
+  // declined), not a classification the rule engine should second-guess.
+  const runInquiryCountRules = useCallback(async () => {
+    setRunningCountRules(true);
+    try {
+      const lenderAliases = await fetchLenderAliases();
+      const toClassify = inquiries.filter((item) => !["deleted", "dnd"].includes(normClass(item.classification)));
+      const untouched = inquiries.filter((item) => ["deleted", "dnd"].includes(normClass(item.classification)));
+
+      const { inquiries: reclassified, summary } = classifyInquiriesWithRules(toClassify, accounts, lenderAliases);
+
+      // Re-merge in original order so the table doesn't visibly reshuffle.
+      let ri = 0, ui = 0;
+      const merged = inquiries.map((item) =>
+        ["deleted", "dnd"].includes(normClass(item.classification)) ? untouched[ui++] : reclassified[ri++]
+      );
+
+      setInquiries(merged);
+      updateCounts_(merged);
+      await saveUpdatedThread(merged);
+
+      const linkedCount = (summary["1A"] || 0) + (summary["1B"] || 0) + (summary["RP"] || 0) + (summary["DL"] || 0);
+      addToast({
+        title: "Inquiries Analyzed",
+        message: `${linkedCount} linked, ${summary.CX || 0} dispute-requested (closed-account match), ${summary["2A"] || 0} disputable.`,
+        variant: "success",
+        icon: "bi-check2-circle",
+      });
+      return summary;
+    } catch (err) {
+      console.error("runInquiryCountRules failed:", err);
+      addToast({ title: "Analysis Failed", message: err.message || "Could not analyze inquiries.", variant: "danger", icon: "bi-exclamation-triangle-fill" });
+      return null;
+    } finally {
+      setRunningCountRules(false);
+    }
+  }, [inquiries, accounts, updateCounts_, saveUpdatedThread, addToast]);
+
   const deletedCount = useMemo(() => inquiries.filter((i) => normClass(i.classification) === "deleted").length, [inquiries]);
   const nonLinkedCount = useMemo(() => inquiries.filter((i) => i.classification && !isIgnoredStatus(i.classification)).length, [inquiries]);
   const deletedRatioPct = useMemo(() => (nonLinkedCount > 0 ? Math.round((deletedCount / nonLinkedCount) * 100) : 0), [deletedCount, nonLinkedCount]);
@@ -813,5 +871,5 @@ export default function useInquiriesThread({
   const handleAddAccount = useCallback(() => { setAccounts((prev) => [...prev, { creditor: "New", type: "revolving", dateOpened: new Date().toLocaleDateString(), openClosed: "Open" }]); }, []);
   const handleDeleteAccount = useCallback(async (index) => { if (await confirm("Delete?")) setAccounts((prev) => prev.filter((_, i) => i !== index)); }, [confirm]);
 
-  return { inquiries, setInquiries, accounts, setAccounts, counts, loading, saving, error, activeTab, setActiveTab, accountTab, setAccountTab, isGenerating, deletedCount, nonLinkedCount, deletedRatioPct, fetchInquiriesThread, saveUpdatedThread, generateDisputeLetters, sendToWebhookAndDeleteClient, filterInquiries, filterAccounts, getTabCount, getAccountTabCount, handleClassificationChange, handleAddInquiry, handleDeleteInquiry, handleAddAccount, handleDeleteAccount, markAllNonLinkedAsDeleted, markAllNonLinkedAsDND, approvedCounts };
+  return { inquiries, setInquiries, accounts, setAccounts, counts, loading, saving, error, activeTab, setActiveTab, accountTab, setAccountTab, isGenerating, deletedCount, nonLinkedCount, deletedRatioPct, fetchInquiriesThread, saveUpdatedThread, generateDisputeLetters, sendToWebhookAndDeleteClient, filterInquiries, filterAccounts, getTabCount, getAccountTabCount, handleClassificationChange, handleAddInquiry, handleDeleteInquiry, handleAddAccount, handleDeleteAccount, markAllNonLinkedAsDeleted, markAllNonLinkedAsDND, runInquiryCountRules, runningCountRules, approvedCounts };
 }

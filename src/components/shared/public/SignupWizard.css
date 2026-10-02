@@ -1,0 +1,345 @@
+/* src/components/shared/public/SignupWizard.css
+ *
+ * Page-specific styles for the 4-step "Start free" signup wizard
+ * (Account / Business / Plan / Payment) built 2026-10-02 to match the
+ * artifact at claude.ai/artifact/1zqtK4sKRSVhVzLe8QVUHF. Shared design
+ * tokens, nav, footer and buttons live in ./hpcTheme.css (imported by
+ * SignupWizard.jsx alongside this file) — only what's unique to the
+ * wizard layout stays here.
+ */
+
+.hpc-wizard-shell {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+}
+
+/* ---- Step progress pills ---- */
+.hpc-wizard-steps {
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+  margin: 0 0 2.2rem;
+  padding: 0;
+}
+
+.hpc-wizard-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  text-align: center;
+}
+
+.hpc-wizard-step-dot {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border: 1px solid var(--hpc-border);
+  color: var(--hpc-muted-dim);
+  background: var(--hpc-panel);
+}
+
+.hpc-wizard-step-label {
+  font-size: 0.75rem;
+  color: var(--hpc-muted-dim);
+  font-weight: 600;
+}
+
+.hpc-wizard-step--current .hpc-wizard-step-dot {
+  border-color: var(--hpc-gold);
+  color: var(--hpc-gold);
+  background: rgba(232, 196, 104, 0.12);
+}
+
+.hpc-wizard-step--current .hpc-wizard-step-label {
+  color: var(--hpc-cream);
+}
+
+.hpc-wizard-step--done .hpc-wizard-step-dot {
+  border-color: var(--hpc-gold);
+  background: var(--hpc-gold);
+  color: #241a08;
+}
+
+.hpc-wizard-step--done .hpc-wizard-step-label {
+  color: var(--hpc-muted);
+}
+
+/* ---- Card shell ---- */
+.hpc-wizard-card {
+  background: var(--hpc-panel);
+  border: 1px solid var(--hpc-border);
+  border-radius: 18px;
+  padding: 2rem 1.8rem;
+}
+
+.hpc-wizard-title {
+  font-size: 1.5rem;
+  margin: 0 0 0.25rem;
+}
+
+.hpc-wizard-sub {
+  margin: 0 0 1.6rem;
+  font-size: 0.85rem;
+}
+
+.hpc-wizard-message {
+  background: rgba(232, 196, 104, 0.1);
+  border: 1px solid var(--hpc-gold);
+  color: var(--hpc-cream);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+  margin-bottom: 1.2rem;
+}
+
+/* Signup failures (bad password, duplicate email, failed auto-login,
+   etc.) — paired with a toast for the first-glance notification, this
+   inline version stays on screen with the "Log in instead" fallback
+   link so the person isn't stuck here once the toast fades. */
+.hpc-wizard-message--error {
+  background: rgba(220, 90, 90, 0.12);
+  border-color: #dc5a5a;
+}
+
+.hpc-wizard-message--error a {
+  color: var(--hpc-gold);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* ---- Fields ---- */
+.hpc-wizard-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+}
+
+.hpc-wizard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--hpc-muted);
+}
+
+.hpc-wizard-field input,
+.hpc-wizard-field select {
+  background: var(--hpc-bg-alt);
+  border: 1px solid var(--hpc-border);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  color: var(--hpc-cream);
+  font-size: 0.95rem;
+  font-weight: 400;
+  font-family: inherit;
+}
+
+.hpc-wizard-field input:focus,
+.hpc-wizard-field select:focus {
+  outline: none;
+  border-color: var(--hpc-gold);
+}
+
+.hpc-wizard-pwchecks {
+  list-style: none;
+  margin: -0.4rem 0 1.3rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--hpc-muted-dim);
+}
+
+.hpc-wizard-pwchecks li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.hpc-wizard-pwchecks li.ok {
+  color: var(--hpc-gold);
+}
+
+.hpc-wizard-login-link {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--hpc-muted-dim);
+  margin: 1rem 0 0;
+}
+
+.hpc-wizard-login-link a {
+  color: var(--hpc-gold);
+  text-decoration: none;
+}
+
+/* ---- Pill-select groups (Business step) ---- */
+.hpc-wizard-pillgroup {
+  margin-bottom: 1.1rem;
+}
+
+.hpc-wizard-pillgroup-label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--hpc-muted);
+  margin-bottom: 0.5rem;
+}
+
+.hpc-wizard-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.hpc-wizard-pill {
+  background: var(--hpc-bg-alt);
+  border: 1px solid var(--hpc-border);
+  color: var(--hpc-muted);
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.hpc-wizard-pill:hover {
+  color: var(--hpc-cream);
+}
+
+.hpc-wizard-pill.active {
+  border-color: var(--hpc-gold);
+  color: var(--hpc-gold);
+  background: rgba(232, 196, 104, 0.1);
+}
+
+/* ---- Plan cards ---- */
+.hpc-wizard-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin-bottom: 1.6rem;
+}
+
+.hpc-wizard-plan {
+  position: relative;
+  text-align: left;
+  background: var(--hpc-bg-alt);
+  border: 1px solid var(--hpc-border);
+  border-radius: 14px;
+  padding: 1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  cursor: pointer;
+  color: var(--hpc-cream);
+}
+
+.hpc-wizard-plan.active {
+  border-color: var(--hpc-gold);
+  background: rgba(232, 196, 104, 0.08);
+}
+
+.hpc-wizard-plan-badge {
+  position: absolute;
+  top: -0.6rem;
+  right: 1rem;
+  background: var(--hpc-gold);
+  color: #241a08;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+}
+
+.hpc-wizard-plan-name {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.hpc-wizard-plan-price {
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.hpc-wizard-plan-reports {
+  font-size: 0.8rem;
+}
+
+/* ---- Payment step ---- */
+.hpc-wizard-summary {
+  background: var(--hpc-bg-alt);
+  border: 1px solid var(--hpc-border);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  margin-bottom: 1.3rem;
+  font-size: 0.88rem;
+}
+
+.hpc-wizard-summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.25rem 0;
+  color: var(--hpc-muted);
+}
+
+.hpc-wizard-summary-total {
+  border-top: 1px solid var(--hpc-border);
+  margin-top: 0.3rem;
+  padding-top: 0.5rem;
+  color: var(--hpc-cream);
+  font-weight: 700;
+}
+
+.hpc-wizard-stripe-note {
+  font-size: 0.76rem;
+  color: var(--hpc-muted-dim);
+  margin: -0.4rem 0 1.2rem;
+}
+
+.hpc-wizard-terms {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--hpc-muted);
+  margin-bottom: 1.4rem;
+}
+
+.hpc-wizard-terms input {
+  margin-top: 0.2rem;
+}
+
+.hpc-wizard-terms a {
+  color: var(--hpc-gold);
+  text-decoration: none;
+}
+
+/* ---- Nav row (Back / Continue) ---- */
+.hpc-wizard-nav-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.hpc-wizard-nav-row .hpc-btn {
+  flex: 1;
+}
+
+@media (max-width: 480px) {
+  .hpc-wizard-row {
+    grid-template-columns: 1fr;
+  }
+}

@@ -3,6 +3,7 @@ import { Card, Button, Spinner, Row, Col, Alert, Form, Badge, Accordion, Tabs, T
 import { calculateFundingEligibility } from "../../../utils/funderRules";
 import { parseSmartCredit } from "../../../utils/parseSmartCredit";
 import { supabase } from "../../../supabaseClient";
+import { IDIQ_SERVICE_URL } from "../../../utils/idiqService";
 
 import FundingBlueprintReport from "../client-pages/FundingBlueprintReport"; 
 import { delay, waitForImages, pagesToImages, imagesToPdf } from "../../../utils/pdfExport";
@@ -260,7 +261,7 @@ export default function QuickEligibilityChecker({ onCheckCompleted, companyId })
                           cleanParsedData = payload;
                       }
                   } else if (provider === "IdentityIQ") {
-                      const res = await fetch("https://backend-4uir.onrender.com/loginidiq", {
+                      const res = await fetch(IDIQ_SERVICE_URL, {
                           method: "POST", headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ email: username, password, pin: securityWord, ssn: "" }),
                       });

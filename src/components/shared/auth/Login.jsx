@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link, useLocation } from "react-router-dom";
 import { supabase } from "../../../supabaseClient";
+import { resolveUserDestination, isDuplicateSignupUser } from "../../../utils/authRouting";
 import {
   Spinner,
   Form,
@@ -29,7 +30,10 @@ export default function Login({
   const [signupType, setSignupType] = useState(startType);
 
   const [step, setStep] = useState(1);
-  const [email, setEmail] = useState("");
+  // Prefilled when arriving from SignupWizard.jsx's "Log in instead"
+  // fallback link (e.g. after a duplicate-email signup attempt) via
+  // navigate('/login', { state: { email } }) — saves retyping it.
+  const [email, setEmail] = useState(location.state?.email || "");
   const [password, setPassword] = useState("");
 
   const [fullName, setFullName] = useState("");
@@ -65,102 +69,16 @@ export default function Login({
   }, [startMode, startType]);
 
   // --- 🚀 ROUTING LOGIC ---
+  // Role-lookup chain lives in utils/authRouting.js now — shared with
+  // SignupWizard.jsx so the two account-creation entry points can never
+  // land a given role in two different places.
   const handleRoleRouting = async (user) => {
     setRoleChecking(true);
     const minLoadTime = new Promise((resolve) => setTimeout(resolve, 2000));
-    const userId = user.id;
-
     try {
-      // 1. CHECK PROFILES TABLE (Admins, Owners, Developers)
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", userId)
-        .maybeSingle();
-
-      if (profile) {
-        const role = profile.role;
-        if (role === "developer") {
-          await minLoadTime;
-          navigate(`/admin/${userId}`, { replace: true });
-          return;
-        }
-        if (role === "customer_service") {
-          await minLoadTime;
-          navigate("/cs-dashboard", { replace: true });
-          return;
-        }
-        if (["admin", "owner", "subadmin", "callers", "counters"].includes(role)) {
-          await minLoadTime;
-          navigate("/admin-dashboard", { replace: true });
-          return;
-        }
-      }
-
-      // 2. CHECK PARTNERS (Companies)
-      const { data: company } = await supabase
-        .from("companies")
-        .select("id, status")
-        .eq("auth_user_id", userId)
-        .maybeSingle();
-
-      if (company) {
-        await minLoadTime;
-        // 🛑 Under-Review check removed here!
-        navigate(`/company-portal/${company.id}/dashboard`, { replace: true });
-        return;
-      }
-
-      // 3. CHECK AFFILIATES
-      const { data: affiliate } = await supabase
-        .from("affiliates")
-        .select("id, status")
-        .eq("auth_user_id", userId)
-        .maybeSingle();
-
-      if (affiliate) {
-        await minLoadTime;
-        // 🛑 Under-Review check removed here!
-        navigate(`/affiliate-portal/${affiliate.id}/dashboard`, { replace: true });
-        return;
-      }
-
-      // 4. CHECK AGENTS
-      const { data: agent } = await supabase
-        .from("company_user_profiles")
-        .select("company_id")
-        .eq("id", userId)
-        .maybeSingle();
-
-      if (agent) {
-        await minLoadTime;
-        navigate(`/company-portal/${agent.company_id}/dashboard`, { replace: true });
-        return;
-      }
-
-      // 5. CHECK CLIENTS (Consumers)
-      const { data: client } = await supabase
-        .from("clients")
-        .select("id, status")
-        .eq("auth_user_id", userId)
-        .maybeSingle();
-
-      if (client) {
-        await minLoadTime;
-        // 🛑 Under-Review check removed here!
-        navigate("/my-dashboard", { replace: true });
-        return;
-      }
-
-      // --- 🩹 SELF-HEALING FALLBACK ---
-      // If user is authenticated but has NO DB row, they might be an orphaned signup
-      if (user.user_metadata?.role === "individual" || user.user_metadata?.role === "client") {
-        await minLoadTime;
-        navigate("/my-dashboard", { replace: true }); // Let IndividualDashboard.jsx heal the profile
-        return;
-      }
-
-      throw new Error("No account profile found. Please contact support.");
+      const destination = await resolveUserDestination(user);
+      await minLoadTime;
+      navigate(destination, { replace: true });
     } catch (err) {
       console.error("Routing Exception:", err);
       setMessage(`❌ Login Failed: ${err.message}`);
@@ -200,7 +118,7 @@ export default function Login({
       if (data.user) {
         await handleRoleRouting(data.user);
       }
-    } catch (err) {
+    } catch {
       setMessage("❌ An unexpected error occurred.");
       setIsLoading(false);
     }
@@ -238,9 +156,18 @@ export default function Login({
 
       if (authError) throw authError;
 
+      // See authRouting.js#isDuplicateSignupUser — Supabase doesn't
+      // error on a re-used email, it just silently returns the
+      // existing account. Catch that here instead of letting the
+      // forced sign-in below fail on a password mismatch with a
+      // confusing error.
+      if (isDuplicateSignupUser(authData.user)) {
+        throw new Error("An account with this email already exists. Please log in instead.");
+      }
+
       setMessage("✅ Account created! Logging you in...");
 
-      // 2. Force Login. 
+      // 2. Force Login.
       // Even though the DB trigger verified the email, signUp doesn't return a session if "Confirm Email" is turned on in Supabase settings. We must log them in manually right after.
       const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
         email: cleanEmail,

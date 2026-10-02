@@ -1,0 +1,280 @@
+/* src/components/shared/public/hpcTheme.css
+ *
+ * Shared dark navy/gold "Hidden Partner Cloud" design system — nav,
+ * footer, buttons, typography tokens — used by both LandingPage.jsx and
+ * SignupWizard.jsx (2026-10-02) so the marketing site and the signup
+ * flow it leads into can never visually drift apart. Page-specific
+ * layout (hero, showcase sections, wizard steps, etc.) stays in each
+ * page's own stylesheet; only what's shared across pages lives here.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,800;1,700&family=JetBrains+Mono:wght@500;600&display=swap');
+
+.hpc-page {
+  /* Measured nav height (0.9rem padding + ~34px logo row) — used by
+     LandingPage.css's .hpc-hero to fill exactly the viewport below the
+     sticky nav, matching the artifact reference. */
+  --hpc-nav-h: 72px;
+  --hpc-bg: #0a0f1e;
+  --hpc-bg-alt: #0d1426;
+  --hpc-panel: #15203f;
+  --hpc-panel-light: #1b2850;
+  --hpc-border: rgba(255, 255, 255, 0.08);
+  --hpc-gold: #e8c468;
+  --hpc-gold-dark: #caa454;
+  --hpc-cream: #f6f1e7;
+  --hpc-muted: #a7b0c7;
+  --hpc-muted-dim: #7d879e;
+
+  background: var(--hpc-bg);
+  color: var(--hpc-cream);
+  font-family: "Inter", sans-serif;
+  overflow-x: hidden;
+}
+
+.hpc-page * {
+  box-sizing: border-box;
+}
+
+.hpc-serif {
+  font-family: "Playfair Display", Georgia, serif;
+}
+
+.hpc-eyebrow {
+  font-family: "JetBrains Mono", "Courier New", monospace;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--hpc-gold);
+}
+
+.hpc-muted {
+  color: var(--hpc-muted);
+}
+
+/* ---- Nav ---- */
+.hpc-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: rgba(10, 15, 30, 0.88);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--hpc-border);
+}
+
+.hpc-nav-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0.9rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.hpc-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--hpc-cream);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.hpc-logo-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--hpc-cream);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hpc-bg);
+  flex-shrink: 0;
+}
+
+.hpc-nav-links {
+  display: none;
+  gap: 2rem;
+  align-items: center;
+}
+
+@media (min-width: 860px) {
+  .hpc-nav-links {
+    display: flex;
+  }
+}
+
+.hpc-nav-link {
+  color: var(--hpc-muted);
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.hpc-nav-link:hover {
+  color: var(--hpc-cream);
+}
+
+.hpc-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* ---- Buttons ---- */
+.hpc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1.3rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.hpc-btn:hover {
+  transform: translateY(-1px);
+}
+
+.hpc-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.hpc-btn-gold {
+  background: var(--hpc-gold);
+  color: #241a08;
+}
+
+.hpc-btn-gold:hover {
+  background: var(--hpc-gold-dark);
+  color: #241a08;
+}
+
+.hpc-btn-outline {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--hpc-cream);
+}
+
+.hpc-btn-outline:hover {
+  border-color: var(--hpc-cream);
+  color: var(--hpc-cream);
+}
+
+.hpc-btn-sm {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.82rem;
+}
+
+.hpc-btn-block {
+  width: 100%;
+}
+
+/* ---- Footer ---- */
+.hpc-footer {
+  border-top: 1px solid var(--hpc-border);
+  padding: 3rem 1.5rem 2.5rem;
+}
+
+.hpc-footer-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.hpc-footer-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.hpc-footer-wordmark {
+  font-family: "Playfair Display", Georgia, serif;
+  font-weight: 700;
+  font-size: 1.4rem;
+  line-height: 1.1;
+}
+
+.hpc-footer-legal {
+  color: var(--hpc-muted-dim);
+  font-size: 0.85rem;
+  max-width: 560px;
+  line-height: 1.6;
+  margin-bottom: 1.3rem;
+}
+
+.hpc-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.4rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.hpc-footer-links a {
+  color: var(--hpc-muted);
+  text-decoration: none;
+}
+
+.hpc-footer-links a:hover {
+  color: var(--hpc-cream);
+}
+
+.hpc-footer-copy {
+  color: var(--hpc-muted-dim);
+}
+
+/* ---- Shared floating cloud background (hero of LandingPage.jsx only —
+   carried over from the pre-redesign landing page per explicit
+   instruction) ---- */
+.hpc-hero-clouds img {
+  position: absolute;
+}
+
+@keyframes cloudCircle {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(50px, 20px); }
+  50% { transform: translate(0, 40px); }
+  75% { transform: translate(-50px, 20px); }
+  100% { transform: translate(0, 0); }
+}
+
+@keyframes cloudCircleReverse {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-50px, 20px); }
+  50% { transform: translate(0, 40px); }
+  75% { transform: translate(50px, 20px); }
+  100% { transform: translate(0, 0); }
+}
+
+@keyframes cloudCircleSlow {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(30px, 15px); }
+  50% { transform: translate(0, 30px); }
+  75% { transform: translate(-30px, 15px); }
+  100% { transform: translate(0, 0); }
+}
+
+.animate-cloud-circle {
+  animation: cloudCircle 20s linear infinite;
+}
+
+.animate-cloud-circle-reverse {
+  animation: cloudCircleReverse 25s linear infinite;
+}
+
+.animate-cloud-circle-slow {
+  animation: cloudCircleSlow 40s linear infinite;
+}

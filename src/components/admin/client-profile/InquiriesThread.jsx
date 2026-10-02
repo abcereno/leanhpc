@@ -3,7 +3,12 @@ import { useAuth } from "../../../context/AuthContext";
 import useInquiriesThread from "../../../hooks/useInquiriesThread";
 import useLogger from "../../../hooks/useLogger"; 
 import AITrainingFeedback from "../AITrainingFeedback";
-import AIAnalysisModal from "../AIAnalysisModal";
+// AIAnalysisModal (GPT-4-turbo analyze-inquiries, review-then-accept UI) is
+// no longer wired in here — the "AI Analysis" button below now runs the
+// deterministic HPC Inquiry Count Rules engine directly via
+// runInquiryCountRules (useInquiriesThread.js) and auto-applies/saves the
+// result instead of staging suggestions for manual review. The modal file
+// itself is left on disk, unused, rather than deleted.
 import LetterEditorModal from "./modals/LetterEditorModal";
 import { useToast } from "../../shared/ui/ToastNotifier";
 // 👇 Added Dropdown and ButtonGroup to the imports 👇
@@ -32,7 +37,6 @@ export default function InquiriesThread({
   const canUseAI = hasPermission("count_inquiries");
   
   const [showTraining, setShowTraining] = useState(false);
-  const [showAIAnalysis, setShowAIAnalysis] = useState(false); 
 
   // New states for the Smart Generation Engine
   const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -82,6 +86,9 @@ export default function InquiriesThread({
     handleDeleteInquiry,
     handleAddAccount,
     handleDeleteAccount,
+
+    runInquiryCountRules,
+    runningCountRules,
 
     approvedCounts,
 
@@ -458,8 +465,17 @@ export default function InquiriesThread({
               {!readonly && (
                 <>
                   {canUseAI && (
-                    <Button variant="outline-primary" onClick={() => setShowAIAnalysis(true)}>
-                      <i className="bi bi-robot me-1"></i> AI Analysis
+                    <Button variant="outline-primary" onClick={runInquiryCountRules} disabled={runningCountRules}>
+                      {runningCountRules ? (
+                        <>
+                          <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />{" "}
+                          Analyzing...
+                        </>
+                      ) : (
+                        <>
+                          <i className="bi bi-robot me-1"></i> Analyze Inquiries
+                        </>
+                      )}
                     </Button>
                   )}
 
@@ -586,20 +602,6 @@ export default function InquiriesThread({
         userId={userId}
       />
 
-      {canUseAI && (
-        <AIAnalysisModal 
-          show={showAIAnalysis} 
-          onClose={() => setShowAIAnalysis(false)} 
-          clientId={clientId}
-          onUpdateSuccess={() => {
-              if (onRefresh) {
-                onRefresh();
-              } else {
-                window.location.reload(); 
-              }
-          }}
-        />
-      )}
     </div>
   );
 }

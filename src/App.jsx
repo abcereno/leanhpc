@@ -44,6 +44,8 @@ const AffiliateProfile = lazy(() => import("./components/affiliate/AffiliateProf
 
 // Public & Auth Pages
 import LoginGate from "./components/shared/auth/LoginGate";
+import SignupWizard from "./components/shared/public/SignupWizard";
+import PostCheckout from "./components/shared/public/PostCheckout";
 import TermsAndConditions from "./components/shared/auth/TermsAndConditions";
 import PrivacyPolicy from "./components/shared/auth/PrivacyPolicy";
 import Login from "./components/shared/auth/Login";
@@ -350,7 +352,12 @@ function AppRoutes() {
           <Route path="/signup/consumer" element={<Login initialMode="signup" initialType="individual" />} />
           <Route path="/signup/partner" element={<Login initialMode="signup" initialType="company" />} />
           <Route path="/signup/affiliate" element={<Login initialMode="signup" initialType="affiliate" />} />
-          
+          <Route path="/start" element={<SignupWizard />} />
+          {/* Where each Stripe Payment Link's "After payment" redirect
+              (set per-link in the Stripe Dashboard) sends the person
+              back to — see PostCheckout.jsx's header comment. */}
+          <Route path="/welcome" element={<PostCheckout />} />
+
           {/* 👇 MOVED: Better suited here than MainLayout so no weird navbars overlay the password forms 👇 */}
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/update-password" element={<UpdatePassword />} />

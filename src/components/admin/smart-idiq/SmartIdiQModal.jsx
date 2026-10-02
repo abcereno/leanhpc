@@ -11,6 +11,7 @@ import { flagGuardedInquiries } from "../../../utils/aiReviewQueue";
 import { useToast } from "../../shared/ui/ToastNotifier";
 import { useConfirm } from "../../shared/ui/ConfirmDialog";
 import DuplicateClientSearch from "../shared/DuplicateClientSearch";
+import { IDIQ_SERVICE_URL } from "../../../utils/idiqService";
 
 export default function SmartIdiQModal({ show, onClose }) {
   const { addToast } = useToast();
@@ -267,7 +268,12 @@ export default function SmartIdiQModal({ show, onClose }) {
     setResultIDIQ(null);
 
     try {
-      const res = await fetch("https://idiq-api.onrender.com/loginidiq", {
+      // idiq-api.onrender.com was a separate, stale Render deploy (not this
+      // repo) that's been hitting IdentityIQ's WAF on every attempt — this
+      // repo's own service (backend-4uir.onrender.com) already has the
+      // stealth-patch fix and support for PIN/SSN accounts. See
+      // reportAutoImport.js's header comment for the other call sites.
+      const res = await fetch(IDIQ_SERVICE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(idiqCreds),

@@ -13,14 +13,12 @@
 // Two providers, one shared shape:
 //   - SmartCredit: fetch_3b_raw + credit_analysis + fetch_3b_report Supabase
 //     edge functions.
-//   - IDIQ: backend-4uir.onrender.com/loginidiq — the same external pull
-//     ParseRreportModal.jsx (admin/company/individual "fetch report" flow)
-//     uses, requiring email/password plus optional pin/ssn. NOTE: there is a
-//     second, older IDIQ endpoint (idiq-api.onrender.com/loginidiq, used by
-//     SmartIdiQModal.jsx's admin quick-add) that only takes email/password —
-//     that one is intentionally NOT used here since it can't authenticate
-//     accounts that require a PIN/SSN, which ParseRreportModal.jsx's version
-//     handles. The raw report from backend-4uir is run through
+//   - IDIQ: IDIQ_SERVICE_URL (utils/idiqService.js) — the same external pull
+//     ParseRreportModal.jsx and SmartIdiQModal.jsx use, requiring
+//     email/password plus optional pin/ssn. Moved off Render
+//     (backend-4uir.onrender.com) to a dedicated VPS on 2026-09-30 after
+//     Render's shared outbound IP got WAF-flagged by IdentityIQ — see the
+//     backend repo's IDIQ_SCRAPER_VPS_SETUP.md. The raw report is run through
 //     utils/auditEngine.js#runAuditEngine (same as ParseRreportModal.jsx) to
 //     get consolidated inquiries/accounts before bucketing by bureau.
 // Both are intentionally left un-classified ("non-linked" default) here —
@@ -39,6 +37,7 @@ import { runAuditEngine } from "./auditEngine";
 import { computeBureauProgress } from "./inquiryCounts";
 import { saveInitialAudit } from "./reportStorage";
 import { buildThreadFromAudit } from "./buildThreadFromAudit";
+import { IDIQ_SERVICE_URL } from "./idiqService";
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -163,13 +162,13 @@ export async function runSmartCreditImport(clientId, { email, password }, counte
 }
 
 /** IDIQ auto-fetch — same external pull ParseRreportModal.jsx uses
- * (backend-4uir.onrender.com/loginidiq) with optional pin/ssn support, run
- * through the shared audit engine, then bucketed by bureau. Intentionally
- * skips SmartIdiQModal.jsx's AI classify-inquiries step (see file header) so
- * both providers on these intake forms behave the same way: everything
- * comes in "non-linked" for a human to classify in the thread editor. */
+ * (IDIQ_SERVICE_URL) with optional pin/ssn support, run through the shared
+ * audit engine, then bucketed by bureau. Intentionally skips
+ * SmartIdiQModal.jsx's AI classify-inquiries step (see file header) so both
+ * providers on these intake forms behave the same way: everything comes in
+ * "non-linked" for a human to classify in the thread editor. */
 export async function runIdiqImport(clientId, { email, password, pin, ssn }, counterName) {
-  const res = await fetch("https://backend-4uir.onrender.com/loginidiq", {
+  const res = await fetch(IDIQ_SERVICE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

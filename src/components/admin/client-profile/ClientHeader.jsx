@@ -733,12 +733,27 @@ export default function ClientHeader({ clientId, onEdit, readonly = false, onRef
                 </div>
               )}
 
-              {/* 👇 NEW: Credit Logins Badges 👇 */}
+              {/* Credit bureau (SmartCredit/IdentityIQ) login credentials
+                  captured at intake — a real password, so this now respects
+                  the same pi.piRevealed reveal/hide toggle as SSN/Email/
+                  Phone/etc. below instead of always showing in plaintext.
+                  Masking only happens client-side (still fetched from
+                  `clients` on every load) — real access control still needs
+                  to happen at the RLS/select level, this just stops it
+                  being visible at a glance to anyone who opens the client. */}
               {(client.report_email || client.report_password) && (
                 <div className="d-flex align-items-center flex-wrap mb-2 mt-1">
                   <small className="text-white-50 me-2 fw-medium"><i className="bi bi-key-fill me-1"></i>Credit Logins:</small>
-                  {client.report_email && <Badge bg="light" text="dark" className="me-2 shadow-sm font-monospace">{client.report_email}</Badge>}
-                  {client.report_password && <Badge bg="light" text="dark" className="shadow-sm font-monospace">{client.report_password}</Badge>}
+                  {client.report_email && (
+                    <Badge bg="light" text="dark" className="me-2 shadow-sm font-monospace">
+                      {pi.piRevealed ? client.report_email : "••••••••"}
+                    </Badge>
+                  )}
+                  {client.report_password && (
+                    <Badge bg="light" text="dark" className="shadow-sm font-monospace">
+                      {pi.piRevealed ? client.report_password : "••••••••"}
+                    </Badge>
+                  )}
                 </div>
               )}
 

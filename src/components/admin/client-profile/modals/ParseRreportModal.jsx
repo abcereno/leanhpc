@@ -8,6 +8,7 @@ import useLogger from "../../../../hooks/useLogger";
 import { useToast } from "../../../shared/ui/ToastNotifier";
 import { computeBureauProgress } from "../../../../utils/inquiryCounts";
 import { extractReportDate, recordReportSnapshot } from "../../../../utils/reportStorage";
+import { IDIQ_SERVICE_URL } from "../../../../utils/idiqService";
 
 const BUCKET = "clients";
 
@@ -44,7 +45,6 @@ export default function ParseReportModal({ show, onClose, clientId, isUpdateMode
 
   const [idiqEmail, setIdiqEmail] = useState("");
   const [idiqPassword, setIdiqPassword] = useState("");
-  const [idiqPin, setIdiqPin] = useState("");
   const [idiqSsn, setIdiqSsn] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -116,17 +116,14 @@ export default function ParseReportModal({ show, onClose, clientId, isUpdateMode
 
     try {
       // 1. CALL NODE JS SERVICE
-      const SERVICE_URL = "https://backend-4uir.onrender.com/loginidiq"; 
-
       const res = await fetchWithTimeout(
-        SERVICE_URL,
+        IDIQ_SERVICE_URL,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             email: idiqEmail,
             password: idiqPassword,
-            pin: idiqPin,
             ssn: idiqSsn,
           }),
         }
@@ -416,20 +413,13 @@ export default function ParseReportModal({ show, onClose, clientId, isUpdateMode
                 </div>
                 </Form.Group>
 
-                <Form.Group className="mb-3">
-                <Form.Label>PIN (if required)</Form.Label>
-                <Form.Control
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={idiqPin}
-                    onChange={(e) => setIdiqPin(e.target.value)}
-                    placeholder="Enter 4-digit PIN"
-                    autoComplete="one-time-code"
-                    disabled={loading || isLocked}
-                />
-                </Form.Group>
-
+                {/* PIN field removed — in practice IdentityIQ accounts only
+                    ever challenge for the last 4 of SSN, never a separate
+                    PIN (confirmed across real fetch attempts). routes/
+                    loginidiq.js still accepts a `pin` field server-side if
+                    that ever turns out wrong for some account, so nothing
+                    there needs to change — this just drops the unused
+                    input from the form. */}
                 <Form.Group className="mb-3">
                 <Form.Label>Last 4 of SSN (if required)</Form.Label>
                 <Form.Control
